@@ -101,28 +101,47 @@ export default function BoardBrain() {
             <CardContent className="space-y-6">
               <div className="text-slate-300 space-y-4">
                 <p>
-                  BoardBrain enhances your board game experience with AI-powered strategic assistance.
-                  Each player gets their own Claude AI partner to help with deduction, analysis, and tactical recommendations.
+                  BoardBrain is your personal AI strategy partner. Get real-time deduction help, 
+                  probability analysis, and tactical recommendations while you play. It's like having 
+                  a grandmaster whispering advice in your ear.
                 </p>
-                <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
-                  <h3 className="font-semibold text-white mb-2">What You Need:</h3>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Physical board game (Clue, Mystery of the Abbey, etc.)</li>
-                    <li>3-6 players</li>
-                    <li>Internet connection</li>
-                  </ul>
+                
+                <div className="bg-slate-900 p-5 rounded-lg border border-slate-700">
+                  <h3 className="font-semibold text-white mb-3 text-center">Games We Love to Dominate</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div className="text-center p-2 bg-slate-800 rounded">
+                      <div className="text-lg mb-1">🔍</div>
+                      <div className="text-white font-medium">Clue</div>
+                    </div>
+                    <div className="text-center p-2 bg-slate-800 rounded">
+                      <div className="text-lg mb-1">♟️</div>
+                      <div className="text-white font-medium">Chess</div>
+                    </div>
+                    <div className="text-center p-2 bg-slate-800 rounded">
+                      <div className="text-lg mb-1">🏠</div>
+                      <div className="text-white font-medium">Catan</div>
+                    </div>
+                    <div className="text-center p-2 bg-slate-800 rounded">
+                      <div className="text-lg mb-1">🚂</div>
+                      <div className="text-white font-medium">Ticket to Ride</div>
+                    </div>
+                  </div>
+                  <p className="text-center text-sm text-slate-400 mt-4">
+                    We'll do whatever it takes to win. 😏
+                  </p>
                 </div>
-                <p className="text-sm text-slate-400">
-                  BoardBrain is a companion tool. You must own and use the physical game.
+
+                <p className="text-sm text-slate-400 text-center">
+                  Grab your physical game, gather your friends, and let's play smarter.
                 </p>
               </div>
 
               <div className="flex gap-4">
                 <Button
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                   onClick={() => setAppPhase('configure')}
                 >
-                  Configure New Game
+                  Start New Game
                 </Button>
                 <Button
                   variant="outline"
@@ -135,7 +154,7 @@ export default function BoardBrain() {
                     }
                   }}
                 >
-                  Join Existing Game
+                  Join Friends
                 </Button>
               </div>
             </CardContent>

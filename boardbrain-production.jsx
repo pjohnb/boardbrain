@@ -127,7 +127,7 @@ export default function BoardBrain() {
                     </div>
                   </div>
                   <p className="text-center text-sm text-slate-400 mt-4">
-                    We'll do whatever it takes to win. 😏
+                    Everyone's using their brain. You're using AI. 🧠
                   </p>
                 </div>
 

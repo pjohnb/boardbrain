@@ -625,7 +625,6 @@ export default function BoardBrain() {
                                 ))
                               }
                             </select>
-                            </Select>
                           )}
                         </div>
                       ))}

@@ -1,87 +1,208 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, Alert, AlertDescription, Checkbox } from './ui-components';
 
-const TIMER_OPTIONS = [15, 30, 45, 60, 90, 120];
-
 /**
- * BoardBrain™
+ * BoardBrain™ - More Brain. Better Game.
  * © 2024 Xformative AI LLC. All Rights Reserved.
- * 
- * More Brain. Better Game.
- * Your AI Strategy Partner for Board Games
- * 
- * This software and its documentation are proprietary to
- * Xformative AI LLC and protected by copyright law.
- * 
- * BoardBrain is not affiliated with any game publisher.
- * All game names and trademarks are property of their
- * respective owners.
  */
 
+// Clue game data
+const CLUE_DATA = {
+  suspects: ['Miss Scarlet', 'Colonel Mustard', 'Mrs. White', 'Mr. Green', 'Mrs. Peacock', 'Professor Plum'],
+  weapons: ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'],
+  rooms: ['Kitchen', 'Ballroom', 'Conservatory', 'Billiard Room', 'Library', 'Study', 'Hall', 'Lounge', 'Dining Room']
+};
+
+const ALL_CARDS = [...CLUE_DATA.suspects, ...CLUE_DATA.weapons, ...CLUE_DATA.rooms];
+
 export default function BoardBrain() {
-  // App phases: welcome, configure, pricing, lobby, playing
-  const [appPhase, setAppPhase] = useState('welcome');
-  const [gameId, setGameId] = useState('');
-  const [myPlayerId, setMyPlayerId] = useState(null);
-
-  // Game configuration (user-provided)
-  const [gameConfig, setGameConfig] = useState(null);
-  const [configForm, setConfigForm] = useState({
-    gameName: '',
-    numSuspects: 6,
-    numWeapons: 6,
-    numRooms: 9,
-    suspects: [],
-    weapons: [],
-    rooms: []
-  });
-
-  // Legal attestation
-  const [attestation, setAttestation] = useState({
-    ownsGame: false,
-    hasPhysicalCopy: false,
-    ageVerified: false
-  });
-
+  // App state
+  const [appPhase, setAppPhase] = useState('welcome'); // welcome, setup, playing
+  const [gameType, setGameType] = useState('CLUE');
+  
+  // Game setup
+  const [numPlayers, setNumPlayers] = useState(4);
+  const [playerNames, setPlayerNames] = useState(['You', 'Player 2', 'Player 3', 'Player 4']);
+  const [myCharacter, setMyCharacter] = useState('');
+  const [myCards, setMyCards] = useState([]);
+  const [remainderCards, setRemainderCards] = useState([]);
+  
   // Game state
-  const [players, setPlayers] = useState([]);
   const [currentTurn, setCurrentTurn] = useState(0);
-  const [gameStarted, setGameStarted] = useState(false);
   const [moves, setMoves] = useState([]);
-
-  // My player data
-  const [myPlayerData, setMyPlayerData] = useState({
-    name: '',
-    character: '',
-    timerPreference: 30,
-    privateCards: {
-      suspects: [],
-      weapons: [],
-      rooms: []
-    }
-  });
-
+  const [knowledgeMatrix, setKnowledgeMatrix] = useState({});
+  
   // Current move input
-  const [currentMove, setCurrentMove] = useState({
+  const [moveForm, setMoveForm] = useState({
+    player: '',
+    movedTo: '',
+    suspect: '',
+    weapon: '',
     room: '',
-    suspectGuess: '',
-    weaponGuess: '',
-    roomGuess: ''
+    responses: []
   });
-
-  // Response to suggestions
-  const [responseInput, setResponseInput] = useState({
-    passed: false,
-    cardShown: ''
-  });
-
-  // AI Chat
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-
-  // ============================================================================
+  
+  // AI panel
+  const [showAI, setShowAI] = useState(false);
+  
+  // Calculate cards per player and remainder
+  const cardsPerPlayer = Math.floor(18 / numPlayers);
+  const remainderCount = 18 % numPlayers;
+  
+  // Initialize knowledge matrix
+  useEffect(() => {
+    if (appPhase === 'playing' && Object.keys(knowledgeMatrix).length === 0) {
+      const matrix = {};
+      ALL_CARDS.forEach(card => {
+        matrix[card] = {
+          me: myCards.includes(card) ? 'HAS' : 'UNKNOWN',
+          solution: remainderCards.includes(card) ? 'NO' : 'UNKNOWN'
+        };
+        playerNames.slice(1).forEach(player => {
+          matrix[card][player] = remainderCards.includes(card) ? 'NO' : 'UNKNOWN';
+        });
+      });
+      setKnowledgeMatrix(matrix);
+    }
+  }, [appPhase, myCards, remainderCards, playerNames]);
+  
+  // Process moves to update knowledge
+  useEffect(() => {
+    if (moves.length === 0) return;
+    
+    const newMatrix = { ...knowledgeMatrix };
+    
+    moves.forEach(move => {
+      if (move.type === 'SUGGESTION') {
+        const suggestedCards = [move.suspect, move.weapon, move.room];
+        
+        move.responses.forEach(response => {
+          if (response.action === 'PASS') {
+            // Player doesn't have ANY of the suggested cards
+            suggestedCards.forEach(card => {
+              if (newMatrix[card]) {
+                newMatrix[card][response.player] = 'NO';
+              }
+            });
+          } else if (response.action === 'SHOW' && response.cardShown) {
+            // Player definitely has this card
+            if (newMatrix[response.cardShown]) {
+              newMatrix[response.cardShown][response.player] = 'HAS';
+              newMatrix[response.cardShown].solution = 'NO';
+            }
+          }
+        });
+      }
+    });
+    
+    setKnowledgeMatrix(newMatrix);
+  }, [moves]);
+  
+  // Calculate probabilities
+  const calculateProbabilities = () => {
+    const probabilities = {
+      suspects: {},
+      weapons: {},
+      rooms: {}
+    };
+    
+    const categories = {
+      suspects: CLUE_DATA.suspects,
+      weapons: CLUE_DATA.weapons,
+      rooms: CLUE_DATA.rooms
+    };
+    
+    Object.entries(categories).forEach(([category, cards]) => {
+      cards.forEach(card => {
+        if (!knowledgeMatrix[card]) return;
+        
+        // If I have it or it's a remainder card, 0% in solution
+        if (knowledgeMatrix[card].me === 'HAS' || knowledgeMatrix[card].solution === 'NO') {
+          probabilities[category][card] = 0;
+          return;
+        }
+        
+        // Check if any player definitely has it
+        const someoneHasIt = playerNames.slice(1).some(player => 
+          knowledgeMatrix[card][player] === 'HAS'
+        );
+        
+        if (someoneHasIt) {
+          probabilities[category][card] = 0;
+          return;
+        }
+        
+        // Count how many cards in this category are still possible
+        const possibleCards = cards.filter(c => {
+          if (!knowledgeMatrix[c]) return true;
+          if (knowledgeMatrix[c].me === 'HAS' || knowledgeMatrix[c].solution === 'NO') return false;
+          return !playerNames.slice(1).some(p => knowledgeMatrix[c][p] === 'HAS');
+        });
+        
+        probabilities[category][card] = possibleCards.length > 0 
+          ? Math.round(100 / possibleCards.length) 
+          : 0;
+      });
+    });
+    
+    return probabilities;
+  };
+  
+  const probabilities = calculateProbabilities();
+  
+  // Get most likely solution
+  const getMostLikelySolution = () => {
+    const findMax = (obj) => {
+      return Object.entries(obj).reduce((max, [card, prob]) => 
+        prob > max.prob ? { card, prob } : max
+      , { card: null, prob: 0 });
+    };
+    
+    return {
+      suspect: findMax(probabilities.suspects),
+      weapon: findMax(probabilities.weapons),
+      room: findMax(probabilities.rooms)
+    };
+  };
+  
+  const solution = getMostLikelySolution();
+  const overallConfidence = solution.suspect.prob && solution.weapon.prob && solution.room.prob
+    ? Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3)
+    : 0;
+  
+  // Handle move submission
+  const handleAddMove = (e) => {
+    e.preventDefault();
+    
+    const newMove = {
+      turn: moves.length + 1,
+      type: 'SUGGESTION',
+      player: moveForm.player,
+      movedTo: moveForm.movedTo,
+      suspect: moveForm.suspect,
+      weapon: moveForm.weapon,
+      room: moveForm.room || moveForm.movedTo,
+      responses: moveForm.responses,
+      timestamp: new Date().toISOString()
+    };
+    
+    setMoves([...moves, newMove]);
+    
+    // Reset form
+    setMoveForm({
+      player: '',
+      movedTo: '',
+      suspect: '',
+      weapon: '',
+      room: '',
+      responses: []
+    });
+    
+    // Advance turn
+    setCurrentTurn((currentTurn + 1) % numPlayers);
+  };
+  
   // WELCOME SCREEN
-  // ============================================================================
   if (appPhase === 'welcome') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
@@ -113,17 +234,20 @@ export default function BoardBrain() {
                       <div className="text-lg mb-1">🔍</div>
                       <div className="text-white font-medium">Clue</div>
                     </div>
-                    <div className="text-center p-2 bg-slate-800 rounded">
+                    <div className="text-center p-2 bg-slate-800 rounded opacity-50">
                       <div className="text-lg mb-1">♟️</div>
                       <div className="text-white font-medium">Chess</div>
+                      <div className="text-xs text-slate-500">Coming Soon</div>
                     </div>
-                    <div className="text-center p-2 bg-slate-800 rounded">
+                    <div className="text-center p-2 bg-slate-800 rounded opacity-50">
                       <div className="text-lg mb-1">🏠</div>
                       <div className="text-white font-medium">Catan</div>
+                      <div className="text-xs text-slate-500">Coming Soon</div>
                     </div>
-                    <div className="text-center p-2 bg-slate-800 rounded">
+                    <div className="text-center p-2 bg-slate-800 rounded opacity-50">
                       <div className="text-lg mb-1">🚂</div>
                       <div className="text-white font-medium">Ticket to Ride</div>
+                      <div className="text-xs text-slate-500">Coming Soon</div>
                     </div>
                   </div>
                   <p className="text-center text-sm text-slate-400 mt-4">
@@ -139,22 +263,9 @@ export default function BoardBrain() {
               <div className="flex gap-4">
                 <Button
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                  onClick={() => setAppPhase('configure')}
+                  onClick={() => setAppPhase('setup')}
                 >
                   Start New Game
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700"
-                  onClick={() => {
-                    const id = prompt('Enter Game ID:');
-                    if (id) {
-                      setGameId(id);
-                      setAppPhase('lobby');
-                    }
-                  }}
-                >
-                  Join Friends
                 </Button>
               </div>
             </CardContent>
@@ -168,636 +279,547 @@ export default function BoardBrain() {
       </div>
     );
   }
-
-  // ============================================================================
-  // CONFIGURATION SCREEN
-  // ============================================================================
-  if (appPhase === 'configure') {
-    const handleConfigSubmit = (e) => {
-      e.preventDefault();
-      if (!attestation.ownsGame || !attestation.hasPhysicalCopy || !attestation.ageVerified) {
-        alert('Please confirm all attestations to continue.');
-        return;
-      }
-      setGameConfig(configForm);
-      setAppPhase('pricing');
-    };
-
+  
+  // SETUP SCREEN
+  if (appPhase === 'setup') {
+    const canStart = myCharacter && myCards.length === cardsPerPlayer && 
+                     remainderCards.length === remainderCount;
+    
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold mb-2">Configure Your Game</h1>
+            <h1 className="text-4xl font-bold mb-2">Setup: Clue</h1>
             <p className="text-slate-400">BoardBrain™ - More Brain. Better Game.</p>
           </div>
 
-          <form onSubmit={handleConfigSubmit}>
-            <Card className="bg-slate-800 border-slate-700 mb-6">
-              <CardHeader>
-                <CardTitle className="text-white">Game Setup</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <Label className="text-white">Game Name</Label>
-                  <Input
-                    className="bg-slate-900 border-slate-700 text-white"
-                    placeholder="e.g., Classic Mystery Game"
-                    value={configForm.gameName}
-                    onChange={(e) => setConfigForm({...configForm, gameName: e.target.value})}
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <Label className="text-white">Suspects</Label>
-                    <Input
-                      type="number"
-                      min="4"
-                      max="8"
-                      className="bg-slate-900 border-slate-700 text-white"
-                      value={configForm.numSuspects}
-                      onChange={(e) => {
-                        const num = parseInt(e.target.value);
-                        setConfigForm({
-                          ...configForm,
-                          numSuspects: num,
-                          suspects: Array(num).fill('')
-                        });
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-white">Weapons</Label>
-                    <Input
-                      type="number"
-                      min="4"
-                      max="8"
-                      className="bg-slate-900 border-slate-700 text-white"
-                      value={configForm.numWeapons}
-                      onChange={(e) => {
-                        const num = parseInt(e.target.value);
-                        setConfigForm({
-                          ...configForm,
-                          numWeapons: num,
-                          weapons: Array(num).fill('')
-                        });
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-white">Rooms</Label>
-                    <Input
-                      type="number"
-                      min="6"
-                      max="12"
-                      className="bg-slate-900 border-slate-700 text-white"
-                      value={configForm.numRooms}
-                      onChange={(e) => {
-                        const num = parseInt(e.target.value);
-                        setConfigForm({
-                          ...configForm,
-                          numRooms: num,
-                          rooms: Array(num).fill('')
-                        });
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-white mb-2 block">Enter Suspect Names</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Array(configForm.numSuspects).fill(0).map((_, i) => (
-                      <Input
-                        key={i}
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder={`Suspect ${i + 1}`}
-                        value={configForm.suspects[i] || ''}
-                        onChange={(e) => {
-                          const newSuspects = [...configForm.suspects];
-                          newSuspects[i] = e.target.value;
-                          setConfigForm({...configForm, suspects: newSuspects});
-                        }}
-                        required
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-white mb-2 block">Enter Weapon Names</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Array(configForm.numWeapons).fill(0).map((_, i) => (
-                      <Input
-                        key={i}
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder={`Weapon ${i + 1}`}
-                        value={configForm.weapons[i] || ''}
-                        onChange={(e) => {
-                          const newWeapons = [...configForm.weapons];
-                          newWeapons[i] = e.target.value;
-                          setConfigForm({...configForm, weapons: newWeapons});
-                        }}
-                        required
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-white mb-2 block">Enter Room Names</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Array(configForm.numRooms).fill(0).map((_, i) => (
-                      <Input
-                        key={i}
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder={`Room ${i + 1}`}
-                        value={configForm.rooms[i] || ''}
-                        onChange={(e) => {
-                          const newRooms = [...configForm.rooms];
-                          newRooms[i] = e.target.value;
-                          setConfigForm({...configForm, rooms: newRooms});
-                        }}
-                        required
-                      />
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-slate-800 border-slate-700 mb-6">
-              <CardHeader>
-                <CardTitle className="text-white">Legal Attestation</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-start space-x-2">
-                  <Checkbox
-                    checked={attestation.ownsGame}
-                    onCheckedChange={(checked) => setAttestation({...attestation, ownsGame: checked})}
-                  />
-                  <Label className="text-sm text-slate-300">
-                    I own a physical copy of this board game
-                  </Label>
-                </div>
-                <div className="flex items-start space-x-2">
-                  <Checkbox
-                    checked={attestation.hasPhysicalCopy}
-                    onCheckedChange={(checked) => setAttestation({...attestation, hasPhysicalCopy: checked})}
-                  />
-                  <Label className="text-sm text-slate-300">
-                    I am playing with the physical board and components
-                  </Label>
-                </div>
-                <div className="flex items-start space-x-2">
-                  <Checkbox
-                    checked={attestation.ageVerified}
-                    onCheckedChange={(checked) => setAttestation({...attestation, ageVerified: checked})}
-                  />
-                  <Label className="text-sm text-slate-300">
-                    I am 13 years of age or older
-                  </Label>
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="flex gap-4">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-slate-600 text-slate-300"
-                onClick={() => setAppPhase('welcome')}
-              >
-                Back
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                Save Configuration & Continue
-              </Button>
-            </div>
-          </form>
-
-          <div className="text-center mt-8 text-xs text-slate-500">
-            <p>© 2024 Xformative AI LLC. All Rights Reserved. | BoardBrain™</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // PRICING SCREEN
-  // ============================================================================
-  if (appPhase === 'pricing') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold mb-2">Choose Your Plan</h1>
-            <p className="text-slate-400">BoardBrain™ - More Brain. Better Game.</p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6 mb-8">
-            <Card className="bg-slate-800 border-slate-700 hover:border-blue-500 transition-colors cursor-pointer">
-              <CardHeader>
-                <CardTitle className="text-white text-center">Basic</CardTitle>
-                <p className="text-center text-3xl font-bold text-blue-400">$1<span className="text-sm text-slate-400">/player</span></p>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-slate-300">
-                  <li>✓ AI Strategy Partner</li>
-                  <li>✓ Real-time Analysis</li>
-                  <li>✓ Basic Deduction</li>
-                </ul>
-                <Button className="w-full mt-4 bg-slate-700 hover:bg-slate-600" onClick={() => setAppPhase('lobby')}>
-                  Select Basic
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-slate-800 border-blue-500 border-2 relative">
-              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-bold">
-                RECOMMENDED
+          <Card className="bg-slate-800 border-slate-700 mb-6">
+            <CardHeader>
+              <CardTitle className="text-white">Game Configuration</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <Label className="text-white mb-2 block">Number of Players</Label>
+                <Select value={numPlayers.toString()} onValueChange={(val) => {
+                  const num = parseInt(val);
+                  setNumPlayers(num);
+                  setPlayerNames(['You', ...Array(num-1).fill(0).map((_, i) => `Player ${i+2}`)]);
+                  setMyCards([]);
+                  setRemainderCards([]);
+                }}>
+                  <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-700">
+                    <SelectItem value="3">3 Players</SelectItem>
+                    <SelectItem value="4">4 Players</SelectItem>
+                    <SelectItem value="5">5 Players</SelectItem>
+                    <SelectItem value="6">6 Players</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-slate-400 mt-1">
+                  You'll get {cardsPerPlayer} cards each{remainderCount > 0 && `, plus ${remainderCount} public card${remainderCount > 1 ? 's' : ''}`}
+                </p>
               </div>
-              <CardHeader>
-                <CardTitle className="text-white text-center">Standard</CardTitle>
-                <p className="text-center text-3xl font-bold text-blue-400">$2<span className="text-sm text-slate-400">/player</span></p>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-slate-300">
-                  <li>✓ Everything in Basic</li>
-                  <li>✓ Advanced Pattern Recognition</li>
-                  <li>✓ Strategic Recommendations</li>
-                </ul>
-                <Button className="w-full mt-4 bg-blue-600 hover:bg-blue-700" onClick={() => setAppPhase('lobby')}>
-                  Select Standard
-                </Button>
-              </CardContent>
-            </Card>
 
-            <Card className="bg-slate-800 border-slate-700 hover:border-purple-500 transition-colors cursor-pointer">
-              <CardHeader>
-                <CardTitle className="text-white text-center">Premium</CardTitle>
-                <p className="text-center text-3xl font-bold text-purple-400">$3<span className="text-sm text-slate-400">/player</span></p>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-slate-300">
-                  <li>✓ Everything in Standard</li>
-                  <li>✓ Priority Processing</li>
-                  <li>✓ Game History & Analysis</li>
-                </ul>
-                <Button className="w-full mt-4 bg-slate-700 hover:bg-slate-600" onClick={() => setAppPhase('lobby')}>
-                  Select Premium
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+              <div>
+                <Label className="text-white mb-2 block">Your Character</Label>
+                <Select value={myCharacter} onValueChange={setMyCharacter}>
+                  <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
+                    <SelectValue placeholder="Select your character" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-700">
+                    {CLUE_DATA.suspects.map(suspect => (
+                      <SelectItem key={suspect} value={suspect}>{suspect}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="text-center">
+              <div>
+                <Label className="text-white mb-2 block">Your Cards (Select {cardsPerPlayer})</Label>
+                <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 max-h-64 overflow-y-auto">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs text-slate-400 mb-2">SUSPECTS</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CLUE_DATA.suspects.map(card => (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={myCards.includes(card)}
+                              onCheckedChange={(checked) => {
+                                if (checked && myCards.length < cardsPerPlayer) {
+                                  setMyCards([...myCards, card]);
+                                } else if (!checked) {
+                                  setMyCards(myCards.filter(c => c !== card));
+                                }
+                              }}
+                            />
+                            <span>{card}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-slate-400 mb-2">WEAPONS</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CLUE_DATA.weapons.map(card => (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={myCards.includes(card)}
+                              onCheckedChange={(checked) => {
+                                if (checked && myCards.length < cardsPerPlayer) {
+                                  setMyCards([...myCards, card]);
+                                } else if (!checked) {
+                                  setMyCards(myCards.filter(c => c !== card));
+                                }
+                              }}
+                            />
+                            <span>{card}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-slate-400 mb-2">ROOMS</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CLUE_DATA.rooms.map(card => (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={myCards.includes(card)}
+                              onCheckedChange={(checked) => {
+                                if (checked && myCards.length < cardsPerPlayer) {
+                                  setMyCards([...myCards, card]);
+                                } else if (!checked) {
+                                  setMyCards(myCards.filter(c => c !== card));
+                                }
+                              }}
+                            />
+                            <span>{card}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-400 mt-1">
+                  Selected: {myCards.length}/{cardsPerPlayer}
+                </p>
+              </div>
+
+              {remainderCount > 0 && (
+                <div>
+                  <Label className="text-white mb-2 block">
+                    Public/Remainder Cards (Select {remainderCount}) 
+                    <span className="text-slate-400 text-sm ml-2">- Visible to all players</span>
+                  </Label>
+                  <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+                    <div className="grid grid-cols-3 gap-2">
+                      {ALL_CARDS.filter(card => !myCards.includes(card)).map(card => (
+                        <label key={card} className="flex items-center space-x-2 text-sm">
+                          <Checkbox
+                            checked={remainderCards.includes(card)}
+                            onCheckedChange={(checked) => {
+                              if (checked && remainderCards.length < remainderCount) {
+                                setRemainderCards([...remainderCards, card]);
+                              } else if (!checked) {
+                                setRemainderCards(remainderCards.filter(c => c !== card));
+                              }
+                            }}
+                          />
+                          <span>{card}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Selected: {remainderCards.length}/{remainderCount}
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="flex gap-4">
             <Button
               variant="outline"
               className="border-slate-600 text-slate-300"
-              onClick={() => setAppPhase('configure')}
+              onClick={() => setAppPhase('welcome')}
             >
-              Back to Configuration
+              Back
+            </Button>
+            <Button
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+              disabled={!canStart}
+              onClick={() => setAppPhase('playing')}
+            >
+              {canStart ? 'Start Playing →' : 'Complete Setup First'}
             </Button>
           </div>
 
           <div className="text-center mt-8 text-xs text-slate-500">
             <p>© 2024 Xformative AI LLC. All Rights Reserved. | BoardBrain™</p>
-            <p className="mt-1">More Brain. Better Game.</p>
           </div>
         </div>
       </div>
     );
   }
-
-  // ============================================================================
-  // LOBBY SCREEN
-  // ============================================================================
-  if (appPhase === 'lobby') {
-    const handleJoinGame = (e) => {
-      e.preventDefault();
-      const newPlayer = {
-        id: Math.random().toString(36).substr(2, 9),
-        ...myPlayerData
-      };
-      setMyPlayerId(newPlayer.id);
-      setPlayers([...players, newPlayer]);
-    };
-
-    const handleStartGame = () => {
-      if (players.length >= 3) {
-        setGameStarted(true);
-        setAppPhase('playing');
-      } else {
-        alert('Need at least 3 players to start!');
-      }
-    };
-
+  
+  // PLAYING SCREEN
+  if (appPhase === 'playing') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold mb-2">Game Lobby</h1>
-            <p className="text-slate-400">BoardBrain™ - More Brain. Better Game.</p>
-            {gameId && (
-              <div className="mt-4 p-4 bg-slate-800 rounded-lg inline-block">
-                <p className="text-sm text-slate-400">Game ID:</p>
-                <p className="text-2xl font-mono font-bold text-blue-400">{gameId || 'XK4P9'}</p>
-              </div>
-            )}
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-4">
+            <h1 className="text-3xl font-bold mb-1">BoardBrain™</h1>
+            <p className="text-sm text-slate-400">Clue - Turn {moves.length + 1}</p>
           </div>
 
-          {!myPlayerId ? (
-            <form onSubmit={handleJoinGame}>
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Left Column - Game Info */}
+            <div className="space-y-4">
+              {/* My Cards */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">Join Game</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label className="text-white">Your Name</Label>
-                    <Input
-                      className="bg-slate-900 border-slate-700 text-white"
-                      value={myPlayerData.name}
-                      onChange={(e) => setMyPlayerData({...myPlayerData, name: e.target.value})}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-white">Choose Character</Label>
-                    <Select value={myPlayerData.character} onValueChange={(val) => setMyPlayerData({...myPlayerData, character: val})}>
-                      <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                        <SelectValue placeholder="Select character" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-900 border-slate-700">
-                        {(gameConfig?.suspects || ['Miss Scarlet', 'Professor Plum', 'Mrs. Peacock']).map(s => (
-                          <SelectItem key={s} value={s}>{s}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-white">Timer Preference (seconds)</Label>
-                    <Select value={myPlayerData.timerPreference.toString()} onValueChange={(val) => setMyPlayerData({...myPlayerData, timerPreference: parseInt(val)})}>
-                      <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-900 border-slate-700">
-                        {TIMER_OPTIONS.map(t => (
-                          <SelectItem key={t} value={t.toString()}>{t}s</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-white mb-2 block">Your Cards (Private)</Label>
-                    <div className="space-y-2">
-                      <Input
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder="Suspects (comma-separated)"
-                        value={myPlayerData.privateCards.suspects.join(', ')}
-                        onChange={(e) => setMyPlayerData({
-                          ...myPlayerData,
-                          privateCards: {
-                            ...myPlayerData.privateCards,
-                            suspects: e.target.value.split(',').map(s => s.trim())
-                          }
-                        })}
-                      />
-                      <Input
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder="Weapons (comma-separated)"
-                        value={myPlayerData.privateCards.weapons.join(', ')}
-                        onChange={(e) => setMyPlayerData({
-                          ...myPlayerData,
-                          privateCards: {
-                            ...myPlayerData.privateCards,
-                            weapons: e.target.value.split(',').map(s => s.trim())
-                          }
-                        })}
-                      />
-                      <Input
-                        className="bg-slate-900 border-slate-700 text-white text-sm"
-                        placeholder="Rooms (comma-separated)"
-                        value={myPlayerData.privateCards.rooms.join(', ')}
-                        onChange={(e) => setMyPlayerData({
-                          ...myPlayerData,
-                          privateCards: {
-                            ...myPlayerData.privateCards,
-                            rooms: e.target.value.split(',').map(s => s.trim())
-                          }
-                        })}
-                      />
-                    </div>
-                  </div>
-
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                    Join Game
-                  </Button>
-                </CardContent>
-              </Card>
-            </form>
-          ) : (
-            <div className="space-y-6">
-              <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">Players ({players.length})</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white">My Cards</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    {players.map(p => (
-                      <div key={p.id} className="flex justify-between items-center p-3 bg-slate-900 rounded">
-                        <div>
-                          <p className="font-semibold text-white">{p.name}</p>
-                          <p className="text-sm text-slate-400">{p.character}</p>
-                        </div>
-                        <p className="text-sm text-slate-500">⏱️ {p.timerPreference}s</p>
-                      </div>
+                  <div className="flex flex-wrap gap-2">
+                    {myCards.map(card => (
+                      <span key={card} className="px-3 py-1 bg-blue-900 text-blue-200 rounded-full text-sm">
+                        {card}
+                      </span>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-
-              <Button
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold"
-                onClick={handleStartGame}
-                disabled={players.length < 3}
-              >
-                {players.length < 3 ? `Waiting for players (${players.length}/3)` : 'Start Game'}
-              </Button>
-            </div>
-          )}
-
-          <div className="text-center mt-8 text-xs text-slate-500">
-            <p>© 2024 Xformative AI LLC. All Rights Reserved. | BoardBrain™</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // PLAYING SCREEN
-  // ============================================================================
-  if (appPhase === 'playing') {
-    const isMyTurn = players[currentTurn]?.id === myPlayerId;
-    const currentPlayer = players[currentTurn];
-
-    const handleSubmitMove = () => {
-      const newMove = {
-        playerId: myPlayerId,
-        playerName: myPlayerData.name,
-        ...currentMove,
-        timestamp: new Date().toISOString()
-      };
-      setMoves([...moves, newMove]);
-      setCurrentMove({ room: '', suspectGuess: '', weaponGuess: '', roomGuess: '' });
-      setCurrentTurn((currentTurn + 1) % players.length);
-
-      // Auto-add AI analysis
-      setChatMessages([...chatMessages, {
-        role: 'assistant',
-        content: `Interesting move to ${currentMove.room}. Based on the suggestion (${currentMove.suspectGuess}, ${currentMove.weaponGuess}, ${currentMove.roomGuess}), I'm tracking the responses. Let me analyze the patterns...`
-      }]);
-    };
-
-    const handleSendChat = () => {
-      if (!chatInput.trim()) return;
-      setChatMessages([...chatMessages, 
-        { role: 'user', content: chatInput },
-        { role: 'assistant', content: `Based on the game state, here's my analysis: [AI response would go here based on moves and cards]` }
-      ]);
-      setChatInput('');
-    };
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-6">
-            <h1 className="text-3xl font-bold mb-1">BoardBrain™</h1>
-            <p className="text-slate-400 text-sm">More Brain. Better Game.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Left: Game State */}
-            <div className="space-y-4">
-              <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">
-                    {isMyTurn ? '🎯 YOUR TURN!' : `⏸️ Waiting for ${currentPlayer?.name}...`}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {isMyTurn ? (
-                    <div className="space-y-3">
-                      <Select value={currentMove.room} onValueChange={(val) => setCurrentMove({...currentMove, room: val, roomGuess: val})}>
-                        <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                          <SelectValue placeholder="Room you moved to" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-slate-900 border-slate-700">
-                          {(gameConfig?.rooms || ['Kitchen', 'Library']).map(r => (
-                            <SelectItem key={r} value={r}>{r}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={currentMove.suspectGuess} onValueChange={(val) => setCurrentMove({...currentMove, suspectGuess: val})}>
-                        <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                          <SelectValue placeholder="Suspect guess" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-slate-900 border-slate-700">
-                          {(gameConfig?.suspects || []).map(s => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={currentMove.weaponGuess} onValueChange={(val) => setCurrentMove({...currentMove, weaponGuess: val})}>
-                        <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                          <SelectValue placeholder="Weapon guess" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-slate-900 border-slate-700">
-                          {(gameConfig?.weapons || []).map(w => (
-                            <SelectItem key={w} value={w}>{w}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={handleSubmitMove}>
-                        Submit Move
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-slate-400">
-                      <p>Waiting for other players...</p>
+                  {remainderCards.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-slate-700">
+                      <p className="text-xs text-slate-400 mb-2">PUBLIC CARDS (Everyone knows):</p>
+                      <div className="flex flex-wrap gap-2">
+                        {remainderCards.map(card => (
+                          <span key={card} className="px-3 py-1 bg-slate-700 text-slate-300 rounded-full text-sm">
+                            {card}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
+              {/* Log Move */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">Recent Moves</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white">Log Move</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {moves.slice(-5).reverse().map((move, i) => (
-                      <div key={i} className="p-2 bg-slate-900 rounded text-sm">
-                        <p className="font-semibold text-white">{move.playerName}</p>
-                        <p className="text-slate-400">{move.suspectGuess}, {move.weaponGuess}, {move.roomGuess}</p>
+                  <form onSubmit={handleAddMove} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-white text-sm">Who's turn?</Label>
+                        <Select value={moveForm.player} onValueChange={(val) => setMoveForm({...moveForm, player: val})}>
+                          <SelectTrigger className="bg-slate-900 border-slate-700 text-white h-9">
+                            <SelectValue placeholder="Select player" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-900 border-slate-700">
+                            {playerNames.map(name => (
+                              <SelectItem key={name} value={name}>{name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    ))}
+                      
+                      <div>
+                        <Label className="text-white text-sm">Moved to</Label>
+                        <Select value={moveForm.movedTo} onValueChange={(val) => setMoveForm({...moveForm, movedTo: val, room: val})}>
+                          <SelectTrigger className="bg-slate-900 border-slate-700 text-white h-9">
+                            <SelectValue placeholder="Room" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-900 border-slate-700">
+                            {CLUE_DATA.rooms.map(room => (
+                              <SelectItem key={room} value={room}>{room}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-sm text-slate-400 mb-2">Suggestion:</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Select value={moveForm.suspect} onValueChange={(val) => setMoveForm({...moveForm, suspect: val})}>
+                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-9 text-xs">
+                              <SelectValue placeholder="Suspect" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-900 border-slate-700">
+                              {CLUE_DATA.suspects.map(s => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Select value={moveForm.weapon} onValueChange={(val) => setMoveForm({...moveForm, weapon: val})}>
+                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-9 text-xs">
+                              <SelectValue placeholder="Weapon" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-900 border-slate-700">
+                              {CLUE_DATA.weapons.map(w => (
+                                <SelectItem key={w} value={w}>{w}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Input
+                            className="bg-slate-800 border-slate-600 text-white h-9 text-xs"
+                            value={moveForm.room || moveForm.movedTo}
+                            readOnly
+                            placeholder="Room"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-sm text-slate-400 mb-2">Responses:</p>
+                      {playerNames.filter(p => p !== moveForm.player).map(player => (
+                        <div key={player} className="flex items-center gap-2 mb-2">
+                          <span className="text-sm text-white w-24">{player}:</span>
+                          <Select 
+                            value={moveForm.responses.find(r => r.player === player)?.action || ''}
+                            onValueChange={(action) => {
+                              const newResponses = moveForm.responses.filter(r => r.player !== player);
+                              if (action) {
+                                newResponses.push({ player, action, cardShown: null });
+                              }
+                              setMoveForm({...moveForm, responses: newResponses});
+                            }}
+                          >
+                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-8 text-xs flex-1">
+                              <SelectValue placeholder="Response" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-900 border-slate-700">
+                              <SelectItem value="PASS">Passed</SelectItem>
+                              <SelectItem value="SHOW">Showed Card</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          
+                          {moveForm.responses.find(r => r.player === player)?.action === 'SHOW' && player === 'You' && (
+                            <Select
+                              value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
+                              onValueChange={(card) => {
+                                const newResponses = moveForm.responses.map(r => 
+                                  r.player === player ? {...r, cardShown: card} : r
+                                );
+                                setMoveForm({...moveForm, responses: newResponses});
+                              }}
+                            >
+                              <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-8 text-xs w-32">
+                                <SelectValue placeholder="Which?" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-slate-900 border-slate-700">
+                                {[moveForm.suspect, moveForm.weapon, moveForm.room]
+                                  .filter(c => myCards.includes(c))
+                                  .map(card => (
+                                    <SelectItem key={card} value={card}>{card}</SelectItem>
+                                  ))
+                                }
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button 
+                      type="submit"
+                      className="w-full bg-blue-600 hover:bg-blue-700 h-9"
+                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon}
+                    >
+                      Log This Move
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              {/* Move History */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white">Move History</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {moves.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-4">No moves yet</p>
+                    ) : (
+                      moves.slice().reverse().map((move, idx) => (
+                        <div key={moves.length - idx} className="p-2 bg-slate-900 rounded text-sm">
+                          <p className="font-semibold text-white">Turn {move.turn}: {move.player}</p>
+                          <p className="text-slate-400 text-xs">
+                            Suggested: {move.suspect}, {move.weapon}, {move.room}
+                          </p>
+                          <div className="text-xs text-slate-500 mt-1">
+                            {move.responses.map(r => (
+                              <span key={r.player} className="mr-2">
+                                {r.player}: {r.action === 'PASS' ? 'Pass' : 'Show'}
+                                {r.cardShown && ` (${r.cardShown})`}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Right: AI Chat */}
-            <div>
-              <Card className="bg-slate-800 border-slate-700 h-full flex flex-col">
-                <CardHeader>
-                  <CardTitle className="text-white">🧠 Your AI Partner</CardTitle>
+            {/* Right Column - AI Analysis */}
+            <div className="space-y-4">
+              {/* Solution Prediction */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    🧠 AI Analysis
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="flex-1 flex flex-col">
-                  <div className="flex-1 overflow-y-auto space-y-3 mb-4">
-                    {chatMessages.map((msg, i) => (
-                      <div key={i} className={`p-3 rounded ${msg.role === 'user' ? 'bg-blue-900' : 'bg-slate-900'}`}>
-                        <p className="text-sm text-white">{msg.content}</p>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-slate-400">Overall Confidence</span>
+                        <span className="text-2xl font-bold text-white">{overallConfidence}%</span>
                       </div>
-                    ))}
+                      <div className="w-full bg-slate-700 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{width: `${overallConfidence}%`}}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-sm text-slate-400 mb-2">Most Likely Solution:</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Suspect:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.suspect.card || 'Unknown'} ({solution.suspect.prob}%)
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Weapon:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.weapon.card || 'Unknown'} ({solution.weapon.prob}%)
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Room:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.room.card || 'Unknown'} ({solution.room.prob}%)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {overallConfidence >= 85 ? (
+                      <Alert className="bg-green-900 border-green-700">
+                        <AlertDescription className="text-green-200 text-sm">
+                          <strong>HIGH CONFIDENCE!</strong> You should consider making your accusation.
+                        </AlertDescription>
+                      </Alert>
+                    ) : overallConfidence >= 70 ? (
+                      <Alert className="bg-yellow-900 border-yellow-700">
+                        <AlertDescription className="text-yellow-200 text-sm">
+                          <strong>GETTING CLOSE.</strong> Gather a bit more information before accusing.
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <Alert className="bg-slate-900 border-slate-700">
+                        <AlertDescription className="text-slate-400 text-sm">
+                          Keep gathering information. Make strategic suggestions to narrow down possibilities.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      className="bg-slate-900 border-slate-700 text-white"
-                      placeholder="Ask your AI partner..."
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendChat()}
-                    />
-                    <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSendChat}>
-                      Send
-                    </Button>
+                </CardContent>
+              </Card>
+
+              {/* Deduction Grid */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white">Deduction Grid</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-700">
+                          <th className="text-left py-1 px-2 text-slate-400">Card</th>
+                          <th className="text-center py-1 px-2 text-slate-400">Me</th>
+                          {playerNames.slice(1).map(name => (
+                            <th key={name} className="text-center py-1 px-2 text-slate-400">{name.slice(0,3)}</th>
+                          ))}
+                          <th className="text-center py-1 px-2 text-slate-400">Sol</th>
+                          <th className="text-center py-1 px-2 text-slate-400">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {['suspects', 'weapons', 'rooms'].map(category => (
+                          <React.Fragment key={category}>
+                            <tr>
+                              <td colSpan={5 + playerNames.length} className="py-1 px-2 text-slate-500 text-xs uppercase bg-slate-900">
+                                {category}
+                              </td>
+                            </tr>
+                            {CLUE_DATA[category].map(card => {
+                              const cardData = knowledgeMatrix[card] || {};
+                              const prob = probabilities[category]?.[card] || 0;
+                              return (
+                                <tr key={card} className="border-b border-slate-700/50">
+                                  <td className="py-1 px-2 text-white">{card}</td>
+                                  <td className="text-center py-1 px-2">
+                                    {cardData.me === 'HAS' ? '✓' : cardData.me === 'NO' ? 'X' : '?'}
+                                  </td>
+                                  {playerNames.slice(1).map(player => (
+                                    <td key={player} className="text-center py-1 px-2">
+                                      {cardData[player] === 'HAS' ? '✓' : cardData[player] === 'NO' ? 'X' : '?'}
+                                    </td>
+                                  ))}
+                                  <td className="text-center py-1 px-2">
+                                    {cardData.solution === 'NO' ? 'X' : '?'}
+                                  </td>
+                                  <td className={`text-center py-1 px-2 font-semibold ${
+                                    prob >= 80 ? 'text-green-400' : 
+                                    prob >= 50 ? 'text-yellow-400' : 
+                                    prob > 0 ? 'text-slate-400' : 'text-slate-600'
+                                  }`}>
+                                    {prob > 0 ? `${prob}%` : '-'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </CardContent>
               </Card>
             </div>
           </div>
 
-          <div className="text-center mt-6 text-xs text-slate-500">
+          <div className="text-center mt-4 text-xs text-slate-500">
             <p>© 2024 Xformative AI LLC. All Rights Reserved. | BoardBrain™ - More Brain. Better Game.</p>
           </div>
         </div>
       </div>
     );
   }
-
+  
   return null;
 }

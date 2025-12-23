@@ -300,23 +300,22 @@ export default function BoardBrain() {
             <CardContent className="space-y-6">
               <div>
                 <Label className="text-white mb-2 block">Number of Players</Label>
-                <Select value={numPlayers.toString()} onValueChange={(val) => {
-                  const num = parseInt(val);
-                  setNumPlayers(num);
-                  setPlayerNames(['You', ...Array(num-1).fill(0).map((_, i) => `Player ${i+2}`)]);
-                  setMyCards([]);
-                  setRemainderCards([]);
-                }}>
-                  <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700">
-                    <SelectItem value="3">3 Players</SelectItem>
-                    <SelectItem value="4">4 Players</SelectItem>
-                    <SelectItem value="5">5 Players</SelectItem>
-                    <SelectItem value="6">6 Players</SelectItem>
-                  </SelectContent>
-                </Select>
+                <select 
+                  className="w-full bg-slate-900 border-slate-700 text-white p-2 rounded border"
+                  value={numPlayers}
+                  onChange={(e) => {
+                    const num = parseInt(e.target.value);
+                    setNumPlayers(num);
+                    setPlayerNames(['You', ...Array(num-1).fill(0).map((_, i) => `Player ${i+2}`)]);
+                    setMyCards([]);
+                    setRemainderCards([]);
+                  }}
+                >
+                  <option value="3">3 Players</option>
+                  <option value="4">4 Players</option>
+                  <option value="5">5 Players</option>
+                  <option value="6">6 Players</option>
+                </select>
                 <p className="text-sm text-slate-400 mt-1">
                   You'll get {cardsPerPlayer} cards each{remainderCount > 0 && `, plus ${remainderCount} public card${remainderCount > 1 ? 's' : ''}`}
                 </p>
@@ -324,16 +323,16 @@ export default function BoardBrain() {
 
               <div>
                 <Label className="text-white mb-2 block">Your Character</Label>
-                <Select value={myCharacter} onValueChange={setMyCharacter}>
-                  <SelectTrigger className="bg-slate-900 border-slate-700 text-white">
-                    <SelectValue placeholder="Select your character" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700">
-                    {CLUE_DATA.suspects.map(suspect => (
-                      <SelectItem key={suspect} value={suspect}>{suspect}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  className="w-full bg-slate-900 border-slate-700 text-white p-2 rounded border"
+                  value={myCharacter}
+                  onChange={(e) => setMyCharacter(e.target.value)}
+                >
+                  <option value="">Select your character</option>
+                  {CLUE_DATA.suspects.map(suspect => (
+                    <option key={suspect} value={suspect}>{suspect}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -519,30 +518,30 @@ export default function BoardBrain() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label className="text-white text-sm">Who's turn?</Label>
-                        <Select value={moveForm.player} onValueChange={(val) => setMoveForm({...moveForm, player: val})}>
-                          <SelectTrigger className="bg-slate-900 border-slate-700 text-white h-9">
-                            <SelectValue placeholder="Select player" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-slate-900 border-slate-700">
-                            {playerNames.map(name => (
-                              <SelectItem key={name} value={name}>{name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <select 
+                          className="w-full bg-slate-900 border-slate-700 text-white h-9 p-1 rounded border"
+                          value={moveForm.player}
+                          onChange={(e) => setMoveForm({...moveForm, player: e.target.value})}
+                        >
+                          <option value="">Select player</option>
+                          {playerNames.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
                       </div>
                       
                       <div>
                         <Label className="text-white text-sm">Moved to</Label>
-                        <Select value={moveForm.movedTo} onValueChange={(val) => setMoveForm({...moveForm, movedTo: val, room: val})}>
-                          <SelectTrigger className="bg-slate-900 border-slate-700 text-white h-9">
-                            <SelectValue placeholder="Room" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-slate-900 border-slate-700">
-                            {CLUE_DATA.rooms.map(room => (
-                              <SelectItem key={room} value={room}>{room}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <select
+                          className="w-full bg-slate-900 border-slate-700 text-white h-9 p-1 rounded border"
+                          value={moveForm.movedTo}
+                          onChange={(e) => setMoveForm({...moveForm, movedTo: e.target.value, room: e.target.value})}
+                        >
+                          <option value="">Room</option>
+                          {CLUE_DATA.rooms.map(room => (
+                            <option key={room} value={room}>{room}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
 
@@ -550,28 +549,28 @@ export default function BoardBrain() {
                       <p className="text-sm text-slate-400 mb-2">Suggestion:</p>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <Select value={moveForm.suspect} onValueChange={(val) => setMoveForm({...moveForm, suspect: val})}>
-                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-9 text-xs">
-                              <SelectValue placeholder="Suspect" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-slate-900 border-slate-700">
-                              {CLUE_DATA.suspects.map(s => (
-                                <SelectItem key={s} value={s}>{s}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <select
+                            className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
+                            value={moveForm.suspect}
+                            onChange={(e) => setMoveForm({...moveForm, suspect: e.target.value})}
+                          >
+                            <option value="">Suspect</option>
+                            {CLUE_DATA.suspects.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
-                          <Select value={moveForm.weapon} onValueChange={(val) => setMoveForm({...moveForm, weapon: val})}>
-                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-9 text-xs">
-                              <SelectValue placeholder="Weapon" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-slate-900 border-slate-700">
-                              {CLUE_DATA.weapons.map(w => (
-                                <SelectItem key={w} value={w}>{w}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <select
+                            className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
+                            value={moveForm.weapon}
+                            onChange={(e) => setMoveForm({...moveForm, weapon: e.target.value})}
+                          >
+                            <option value="">Weapon</option>
+                            {CLUE_DATA.weapons.map(w => (
+                              <option key={w} value={w}>{w}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <Input
@@ -589,9 +588,11 @@ export default function BoardBrain() {
                       {playerNames.filter(p => p !== moveForm.player).map(player => (
                         <div key={player} className="flex items-center gap-2 mb-2">
                           <span className="text-sm text-white w-24">{player}:</span>
-                          <Select 
+                          <select
+                            className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
                             value={moveForm.responses.find(r => r.player === player)?.action || ''}
-                            onValueChange={(action) => {
+                            onChange={(e) => {
+                              const action = e.target.value;
                               const newResponses = moveForm.responses.filter(r => r.player !== player);
                               if (action) {
                                 newResponses.push({ player, action, cardShown: null });
@@ -599,36 +600,31 @@ export default function BoardBrain() {
                               setMoveForm({...moveForm, responses: newResponses});
                             }}
                           >
-                            <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-8 text-xs flex-1">
-                              <SelectValue placeholder="Response" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-slate-900 border-slate-700">
-                              <SelectItem value="PASS">Passed</SelectItem>
-                              <SelectItem value="SHOW">Showed Card</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            <option value="">Response</option>
+                            <option value="PASS">Passed</option>
+                            <option value="SHOW">Showed Card</option>
+                          </select>
                           
                           {moveForm.responses.find(r => r.player === player)?.action === 'SHOW' && player === 'You' && (
-                            <Select
+                            <select
+                              className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
                               value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
-                              onValueChange={(card) => {
+                              onChange={(e) => {
+                                const card = e.target.value;
                                 const newResponses = moveForm.responses.map(r => 
                                   r.player === player ? {...r, cardShown: card} : r
                                 );
                                 setMoveForm({...moveForm, responses: newResponses});
                               }}
                             >
-                              <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-8 text-xs w-32">
-                                <SelectValue placeholder="Which?" />
-                              </SelectTrigger>
-                              <SelectContent className="bg-slate-900 border-slate-700">
-                                {[moveForm.suspect, moveForm.weapon, moveForm.room]
-                                  .filter(c => myCards.includes(c))
-                                  .map(card => (
-                                    <SelectItem key={card} value={card}>{card}</SelectItem>
-                                  ))
-                                }
-                              </SelectContent>
+                              <option value="">Which?</option>
+                              {[moveForm.suspect, moveForm.weapon, moveForm.room]
+                                .filter(c => myCards.includes(c))
+                                .map(card => (
+                                  <option key={card} value={card}>{card}</option>
+                                ))
+                              }
+                            </select>
                             </Select>
                           )}
                         </div>

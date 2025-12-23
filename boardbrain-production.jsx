@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, Alert, AlertDescription, Checkbox } from './ui-components';
+import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Textarea, Alert, AlertDescription, Checkbox } from './ui-components';
 
 /**
  * BoardBrain™ - More Brain. Better Game.

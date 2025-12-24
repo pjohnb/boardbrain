@@ -495,38 +495,52 @@ export default function BoardBrain() {
               {/* Other Players' Characters */}
               {numPlayers > 1 && (
                 <div>
-                  <Label className="text-white mb-2 block">Other Players (Optional)</Label>
+                  <Label className="text-white mb-2 block">Other Players</Label>
                   <div className="space-y-2">
-                    {playerNames.slice(1).map((player, idx) => (
-                      <div key={player} className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
-                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                          value={player.startsWith('Player') ? '' : player}
-                          onChange={(e) => {
-                            const newNames = [...playerNames];
-                            newNames[idx + 1] = e.target.value || `Player ${idx + 2}`;
-                            setPlayerNames(newNames);
-                          }}
-                        />
-                        <select
-                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                          value={playerCharacters[player] || ''}
-                          onChange={(e) => {
-                            setPlayerCharacters({...playerCharacters, [player]: e.target.value});
-                          }}
-                        >
-                          <option value="">Character (optional)</option>
-                          {CLUE_DATA.suspects.map(suspect => (
-                            <option key={suspect} value={suspect}>{suspect}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
+                    {playerNames.slice(1).map((player, idx) => {
+                      const playerKey = `player_${idx + 2}`; // Use stable key instead of player name
+                      return (
+                        <div key={playerKey} className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
+                            className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                            defaultValue={player.startsWith('Player') ? '' : player}
+                            onBlur={(e) => {
+                              const newName = e.target.value || `Player ${idx + 2}`;
+                              const newNames = [...playerNames];
+                              const oldName = newNames[idx + 1];
+                              newNames[idx + 1] = newName;
+                              
+                              // Preserve character when name changes
+                              if (oldName !== newName && playerCharacters[oldName]) {
+                                const newChars = {...playerCharacters};
+                                newChars[newName] = newChars[oldName];
+                                delete newChars[oldName];
+                                setPlayerCharacters(newChars);
+                              }
+                              
+                              setPlayerNames(newNames);
+                            }}
+                          />
+                          <select
+                            className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                            value={playerCharacters[player] || ''}
+                            onChange={(e) => {
+                              setPlayerCharacters({...playerCharacters, [player]: e.target.value});
+                            }}
+                          >
+                            <option value="">Character (optional)</option>
+                            {CLUE_DATA.suspects.filter(s => s !== myCharacter).map(suspect => (
+                              <option key={suspect} value={suspect}>{suspect}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
                   </div>
                   <p className="text-xs text-slate-400 mt-2">
-                    Add real names and characters for better tracking during the game
+                    Names and characters help track players during the game
                   </p>
                 </div>
               )}

@@ -6,7 +6,163 @@ import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Textare
  * © 2024 Xformative AI LLC. All Rights Reserved.
  */
 
-// Clue game data
+// ============================================================================
+// CLUE CSP (Constraint Satisfaction Problem) SOLVER
+// ============================================================================
+
+/**
+ * This solver calculates EXACT probabilities by enumerating all possible
+ * vault combinations and eliminating those inconsistent with constraints.
+ */
+class ClueCSPSolver {
+  constructor(gameData) {
+    this.suspects = gameData.suspects;
+    this.weapons = gameData.weapons;
+    this.rooms = gameData.rooms;
+    this.eliminatedCards = new Set();
+    this.constraints = [];
+    this.validVaultCombos = null;
+    this.needsRecalculation = true;
+  }
+  
+  eliminateCard(card) {
+    this.eliminatedCards.add(card);
+    this.needsRecalculation = true;
+  }
+  
+  addPassConstraint(player, suggestedCards) {
+    this.constraints.push({
+      type: 'PASS',
+      player,
+      cards: suggestedCards
+    });
+    this.needsRecalculation = true;
+  }
+  
+  addShowConstraint(player, suggestedCards, cardShown = null) {
+    if (cardShown) {
+      this.eliminateCard(cardShown);
+    } else {
+      this.constraints.push({
+        type: 'SHOW',
+        player,
+        cards: suggestedCards
+      });
+    }
+    this.needsRecalculation = true;
+  }
+  
+  generateAllVaultCombinations() {
+    const combos = [];
+    for (const suspect of this.suspects) {
+      for (const weapon of this.weapons) {
+        for (const room of this.rooms) {
+          combos.push({ suspect, weapon, room });
+        }
+      }
+    }
+    return combos;
+  }
+  
+  isValidVaultCombo(combo) {
+    if (this.eliminatedCards.has(combo.suspect) ||
+        this.eliminatedCards.has(combo.weapon) ||
+        this.eliminatedCards.has(combo.room)) {
+      return false;
+    }
+    
+    for (const constraint of this.constraints) {
+      if (constraint.type === 'SHOW') {
+        const allInVault = constraint.cards.every(card =>
+          card === combo.suspect || card === combo.weapon || card === combo.room
+        );
+        if (allInVault) {
+          return false;
+        }
+      }
+    }
+    
+    return true;
+  }
+  
+  calculateValidCombinations() {
+    if (!this.needsRecalculation && this.validVaultCombos) {
+      return this.validVaultCombos;
+    }
+    
+    const allCombos = this.generateAllVaultCombinations();
+    this.validVaultCombos = allCombos.filter(combo => this.isValidVaultCombo(combo));
+    this.needsRecalculation = false;
+    
+    return this.validVaultCombos;
+  }
+  
+  calculateProbabilities() {
+    const validCombos = this.calculateValidCombinations();
+    
+    if (validCombos.length === 0) {
+      return { suspects: {}, weapons: {}, rooms: {}, totalCombinations: 0 };
+    }
+    
+    const total = validCombos.length;
+    const cardCounts = {};
+    
+    validCombos.forEach(combo => {
+      cardCounts[combo.suspect] = (cardCounts[combo.suspect] || 0) + 1;
+      cardCounts[combo.weapon] = (cardCounts[combo.weapon] || 0) + 1;
+      cardCounts[combo.room] = (cardCounts[combo.room] || 0) + 1;
+    });
+    
+    const probabilities = {
+      suspects: {},
+      weapons: {},
+      rooms: {}
+    };
+    
+    this.suspects.forEach(card => {
+      probabilities.suspects[card] = this.eliminatedCards.has(card) ? 0 : Math.round(((cardCounts[card] || 0) / total) * 100);
+    });
+    this.weapons.forEach(card => {
+      probabilities.weapons[card] = this.eliminatedCards.has(card) ? 0 : Math.round(((cardCounts[card] || 0) / total) * 100);
+    });
+    this.rooms.forEach(card => {
+      probabilities.rooms[card] = this.eliminatedCards.has(card) ? 0 : Math.round(((cardCounts[card] || 0) / total) * 100);
+    });
+    
+    probabilities.totalCombinations = total;
+    
+    return probabilities;
+  }
+  
+  getMostLikelySolution() {
+    const probs = this.calculateProbabilities();
+    
+    const findMax = (cards, category) => {
+      let maxCard = null;
+      let maxProb = 0;
+      cards.forEach(card => {
+        const prob = probs[category][card] || 0;
+        if (prob > maxProb) {
+          maxProb = prob;
+          maxCard = card;
+        }
+      });
+      return { card: maxCard, prob: maxProb };
+    };
+    
+    return {
+      suspect: findMax(this.suspects, 'suspects'),
+      weapon: findMax(this.weapons, 'weapons'),
+      room: findMax(this.rooms, 'rooms'),
+      totalCombinations: probs.totalCombinations
+    };
+  }
+}
+
+// ============================================================================
+// CLUE GAME DATA
+// ============================================================================
+
 const CLUE_DATA = {
   suspects: ['Miss Scarlet', 'Colonel Mustard', 'Mrs. White', 'Mr. Green', 'Mrs. Peacock', 'Professor Plum'],
   weapons: ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'],
@@ -31,6 +187,8 @@ export default function BoardBrain() {
   const [currentTurn, setCurrentTurn] = useState(0);
   const [moves, setMoves] = useState([]);
   const [knowledgeMatrix, setKnowledgeMatrix] = useState({});
+  const [constraints, setConstraints] = useState([]); // Track when player shows unknown card
+  const [cspSolver, setCspSolver] = useState(null); // CSP solver instance
   
   // Current move input
   const [moveForm, setMoveForm] = useState({
@@ -49,123 +207,118 @@ export default function BoardBrain() {
   const cardsPerPlayer = Math.floor(18 / numPlayers);
   const remainderCount = 18 % numPlayers;
   
-  // Initialize knowledge matrix
+  // Initialize knowledge matrix and CSP solver
   useEffect(() => {
     if (appPhase === 'playing' && Object.keys(knowledgeMatrix).length === 0) {
+      // Initialize knowledge matrix
       const matrix = {};
       ALL_CARDS.forEach(card => {
         matrix[card] = {
           me: myCards.includes(card) ? 'HAS' : 'UNKNOWN',
-          solution: remainderCards.includes(card) ? 'NO' : 'UNKNOWN'
+          solution: remainderCards.includes(card) ? 'NO' : 'UNKNOWN',
+          constraints: [] // Track which constraints involve this card
         };
         playerNames.slice(1).forEach(player => {
           matrix[card][player] = remainderCards.includes(card) ? 'NO' : 'UNKNOWN';
         });
       });
       setKnowledgeMatrix(matrix);
+      
+      // Initialize CSP solver
+      const solver = new ClueCSPSolver(CLUE_DATA);
+      
+      // Eliminate cards we know (our cards + public cards)
+      [...myCards, ...remainderCards].forEach(card => {
+        solver.eliminateCard(card);
+      });
+      
+      setCspSolver(solver);
     }
   }, [appPhase, myCards, remainderCards, playerNames]);
   
-  // Process moves to update knowledge
+  // Process moves to update knowledge and CSP solver
   useEffect(() => {
-    if (moves.length === 0) return;
+    if (moves.length === 0 || !cspSolver) return;
     
     const newMatrix = { ...knowledgeMatrix };
+    const newConstraints = [];
     
-    moves.forEach(move => {
-      if (move.type === 'SUGGESTION') {
-        const suggestedCards = [move.suspect, move.weapon, move.room];
-        
-        move.responses.forEach(response => {
-          if (response.action === 'PASS') {
-            // Player doesn't have ANY of the suggested cards
-            suggestedCards.forEach(card => {
-              if (newMatrix[card]) {
-                newMatrix[card][response.player] = 'NO';
-              }
-            });
-          } else if (response.action === 'SHOW' && response.cardShown) {
-            // Player definitely has this card
-            if (newMatrix[response.cardShown]) {
-              newMatrix[response.cardShown][response.player] = 'HAS';
-              newMatrix[response.cardShown].solution = 'NO';
+    // Get the most recent move
+    const move = moves[moves.length - 1];
+    
+    if (move.type === 'SUGGESTION') {
+      const suggestedCards = [move.suspect, move.weapon, move.room];
+      
+      move.responses.forEach(response => {
+        if (response.action === 'PASS') {
+          // Player doesn't have ANY of the suggested cards
+          suggestedCards.forEach(card => {
+            if (newMatrix[card]) {
+              newMatrix[card][response.player] = 'NO';
             }
+          });
+          
+          // Add PASS constraint to CSP solver
+          cspSolver.addPassConstraint(response.player, suggestedCards);
+          
+        } else if (response.action === 'SHOW' && response.cardShown) {
+          // Player definitely has this card (we know which one)
+          if (newMatrix[response.cardShown]) {
+            newMatrix[response.cardShown][response.player] = 'HAS';
+            newMatrix[response.cardShown].solution = 'NO';
           }
-        });
-      }
-    });
+          
+          // Tell CSP solver this card is NOT in vault
+          cspSolver.addShowConstraint(response.player, suggestedCards, response.cardShown);
+          
+        } else if (response.action === 'SHOW' && !response.cardShown) {
+          // Player showed but we don't know which card - CREATE CONSTRAINT
+          const constraintId = `C${constraints.length + newConstraints.length + 1}`;
+          newConstraints.push({
+            id: constraintId,
+            turn: move.turn,
+            player: response.player,
+            cards: suggestedCards,
+            resolved: false
+          });
+          
+          // Mark each card as having a constraint for this player
+          suggestedCards.forEach(card => {
+            if (newMatrix[card] && newMatrix[card][response.player] === 'UNKNOWN') {
+              newMatrix[card][response.player] = 'CONSTRAINT';
+              if (!newMatrix[card].constraints) {
+                newMatrix[card].constraints = [];
+              }
+              newMatrix[card].constraints.push(constraintId);
+            }
+          });
+          
+          // Add SHOW constraint to CSP solver (unknown card)
+          cspSolver.addShowConstraint(response.player, suggestedCards, null);
+        }
+      });
+    }
     
     setKnowledgeMatrix(newMatrix);
-  }, [moves]);
+    setConstraints([...constraints, ...newConstraints]);
+  }, [moves, cspSolver]);
   
-  // Calculate probabilities
-  const calculateProbabilities = () => {
-    const probabilities = {
-      suspects: {},
-      weapons: {},
-      rooms: {}
-    };
-    
-    const categories = {
-      suspects: CLUE_DATA.suspects,
-      weapons: CLUE_DATA.weapons,
-      rooms: CLUE_DATA.rooms
-    };
-    
-    Object.entries(categories).forEach(([category, cards]) => {
-      cards.forEach(card => {
-        if (!knowledgeMatrix[card]) return;
-        
-        // If I have it or it's a remainder card, 0% in solution
-        if (knowledgeMatrix[card].me === 'HAS' || knowledgeMatrix[card].solution === 'NO') {
-          probabilities[category][card] = 0;
-          return;
-        }
-        
-        // Check if any player definitely has it
-        const someoneHasIt = playerNames.slice(1).some(player => 
-          knowledgeMatrix[card][player] === 'HAS'
-        );
-        
-        if (someoneHasIt) {
-          probabilities[category][card] = 0;
-          return;
-        }
-        
-        // Count how many cards in this category are still possible
-        const possibleCards = cards.filter(c => {
-          if (!knowledgeMatrix[c]) return true;
-          if (knowledgeMatrix[c].me === 'HAS' || knowledgeMatrix[c].solution === 'NO') return false;
-          return !playerNames.slice(1).some(p => knowledgeMatrix[c][p] === 'HAS');
-        });
-        
-        probabilities[category][card] = possibleCards.length > 0 
-          ? Math.round(100 / possibleCards.length) 
-          : 0;
-      });
-    });
-    
-    return probabilities;
+  // Calculate probabilities using CSP solver
+  const probabilities = cspSolver ? cspSolver.calculateProbabilities() : {
+    suspects: {},
+    weapons: {},
+    rooms: {},
+    totalCombinations: 324 // Initial total
   };
   
-  const probabilities = calculateProbabilities();
-  
-  // Get most likely solution
-  const getMostLikelySolution = () => {
-    const findMax = (obj) => {
-      return Object.entries(obj).reduce((max, [card, prob]) => 
-        prob > max.prob ? { card, prob } : max
-      , { card: null, prob: 0 });
-    };
-    
-    return {
-      suspect: findMax(probabilities.suspects),
-      weapon: findMax(probabilities.weapons),
-      room: findMax(probabilities.rooms)
-    };
+  // Get most likely solution from CSP solver
+  const solution = cspSolver ? cspSolver.getMostLikelySolution() : {
+    suspect: { card: null, prob: 0 },
+    weapon: { card: null, prob: 0 },
+    room: { card: null, prob: 0 },
+    totalCombinations: 324
   };
   
-  const solution = getMostLikelySolution();
   const overallConfidence = solution.suspect.prob && solution.weapon.prob && solution.room.prob
     ? Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3)
     : 0;
@@ -475,6 +628,12 @@ export default function BoardBrain() {
           <div className="text-center mb-4">
             <h1 className="text-3xl font-bold mb-1">BoardBrain™</h1>
             <p className="text-sm text-slate-400">Clue - Turn {moves.length + 1}</p>
+            <div className="mt-2 flex justify-center items-center gap-2 text-sm">
+              <span className="text-slate-400">Current Turn:</span>
+              <span className="text-white font-semibold bg-blue-900 px-3 py-1 rounded">
+                → {playerNames[currentTurn % numPlayers]}
+              </span>
+            </div>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-4">
@@ -750,43 +909,98 @@ export default function BoardBrain() {
                   <CardTitle className="text-lg text-white">Deduction Grid</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  {/* Legend */}
+                  <div className="mb-4 p-3 bg-slate-900 rounded-lg border border-slate-700">
+                    <p className="text-xs text-slate-400 mb-2 font-semibold">LEGEND:</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-6 h-6 bg-green-900 border border-green-700 rounded flex items-center justify-center text-green-300">✓</span>
+                        <span className="text-slate-300">Has card</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-6 h-6 bg-red-900 border border-red-700 rounded flex items-center justify-center text-red-300">X</span>
+                        <span className="text-slate-300">Eliminated</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-6 h-6 bg-yellow-900 border border-yellow-700 rounded flex items-center justify-center text-yellow-300">⚠️</span>
+                        <span className="text-slate-300">Constraint (might have)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-6 h-6 bg-slate-800 border border-slate-600 rounded flex items-center justify-center text-slate-500">?</span>
+                        <span className="text-slate-300">Unknown</span>
+                      </div>
+                    </div>
+                  </div>
+                  
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-xs border-collapse">
                       <thead>
-                        <tr className="border-b border-slate-700">
-                          <th className="text-left py-1 px-2 text-slate-400">Card</th>
-                          <th className="text-center py-1 px-2 text-slate-400">Me</th>
-                          {playerNames.slice(1).map(name => (
-                            <th key={name} className="text-center py-1 px-2 text-slate-400">{name.slice(0,3)}</th>
+                        <tr className="border-b-2 border-slate-600">
+                          <th className="text-left py-2 px-2 text-slate-400 font-semibold">Card</th>
+                          <th className="text-center py-2 px-2 text-slate-400 font-semibold">Me</th>
+                          {playerNames.slice(1).map((name, idx) => (
+                            <th key={name} className="text-center py-2 px-2 text-slate-400 font-semibold">
+                              {name.slice(0,3)}
+                              {currentTurn % numPlayers === idx + 1 && <span className="ml-1">→</span>}
+                            </th>
                           ))}
-                          <th className="text-center py-1 px-2 text-slate-400">Sol</th>
-                          <th className="text-center py-1 px-2 text-slate-400">%</th>
+                          <th className="text-center py-2 px-2 text-slate-400 font-semibold">Sol</th>
+                          <th className="text-center py-2 px-2 text-slate-400 font-semibold">%</th>
                         </tr>
                       </thead>
                       <tbody>
                         {['suspects', 'weapons', 'rooms'].map(category => (
                           <React.Fragment key={category}>
                             <tr>
-                              <td colSpan={5 + playerNames.length} className="py-1 px-2 text-slate-500 text-xs uppercase bg-slate-900">
+                              <td colSpan={5 + playerNames.length} className="py-1 px-2 text-slate-500 text-xs uppercase bg-slate-900 font-semibold">
                                 {category}
                               </td>
                             </tr>
                             {CLUE_DATA[category].map(card => {
                               const cardData = knowledgeMatrix[card] || {};
                               const prob = probabilities[category]?.[card] || 0;
+                              
+                              // Helper function to get cell class and content
+                              const getCellDisplay = (status) => {
+                                if (status === 'HAS') {
+                                  return { bg: 'bg-green-900 border border-green-700', text: 'text-green-300', symbol: '✓' };
+                                } else if (status === 'NO') {
+                                  return { bg: 'bg-red-900 border border-red-700', text: 'text-red-300', symbol: 'X' };
+                                } else if (status === 'CONSTRAINT') {
+                                  return { bg: 'bg-yellow-900 border border-yellow-700', text: 'text-yellow-300', symbol: '⚠️' };
+                                } else {
+                                  return { bg: 'bg-slate-800 border border-slate-600', text: 'text-slate-500', symbol: '?' };
+                                }
+                              };
+                              
+                              // Check if card is eliminated from solution
+                              const isEliminated = cardData.me === 'HAS' || cardData.solution === 'NO' || 
+                                                   playerNames.slice(1).some(p => cardData[p] === 'HAS');
+                              
                               return (
-                                <tr key={card} className="border-b border-slate-700/50">
-                                  <td className="py-1 px-2 text-white">{card}</td>
-                                  <td className="text-center py-1 px-2">
-                                    {cardData.me === 'HAS' ? '✓' : cardData.me === 'NO' ? 'X' : '?'}
+                                <tr key={card} className="border-b border-slate-700/30">
+                                  <td className={`py-1 px-2 ${isEliminated ? 'text-slate-600 line-through' : 'text-white'}`}>
+                                    {card}
                                   </td>
-                                  {playerNames.slice(1).map(player => (
-                                    <td key={player} className="text-center py-1 px-2">
-                                      {cardData[player] === 'HAS' ? '✓' : cardData[player] === 'NO' ? 'X' : '?'}
-                                    </td>
-                                  ))}
-                                  <td className="text-center py-1 px-2">
-                                    {cardData.solution === 'NO' ? 'X' : '?'}
+                                  <td className="text-center py-1 px-1">
+                                    <span className={`inline-block w-full py-1 rounded ${getCellDisplay(cardData.me).bg} ${getCellDisplay(cardData.me).text}`}>
+                                      {getCellDisplay(cardData.me).symbol}
+                                    </span>
+                                  </td>
+                                  {playerNames.slice(1).map(player => {
+                                    const display = getCellDisplay(cardData[player]);
+                                    return (
+                                      <td key={player} className="text-center py-1 px-1">
+                                        <span className={`inline-block w-full py-1 rounded ${display.bg} ${display.text}`}>
+                                          {display.symbol}
+                                        </span>
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="text-center py-1 px-1">
+                                    <span className={`inline-block w-full py-1 rounded ${getCellDisplay(cardData.solution === 'NO' ? 'NO' : 'UNKNOWN').bg} ${getCellDisplay(cardData.solution === 'NO' ? 'NO' : 'UNKNOWN').text}`}>
+                                      {cardData.solution === 'NO' ? 'X' : '?'}
+                                    </span>
                                   </td>
                                   <td className={`text-center py-1 px-2 font-semibold ${
                                     prob >= 80 ? 'text-green-400' : 

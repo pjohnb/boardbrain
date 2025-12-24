@@ -179,6 +179,7 @@ export default function BoardBrain() {
   // Game setup
   const [numPlayers, setNumPlayers] = useState(4);
   const [playerNames, setPlayerNames] = useState(['You', 'Player 2', 'Player 3', 'Player 4']);
+  const [playerCharacters, setPlayerCharacters] = useState({}); // Maps player name to character
   const [myCharacter, setMyCharacter] = useState('');
   const [myCards, setMyCards] = useState([]);
   const [remainderCards, setRemainderCards] = useState([]);
@@ -479,7 +480,10 @@ export default function BoardBrain() {
                 <select
                   className="w-full bg-slate-900 border-slate-700 text-white p-2 rounded border"
                   value={myCharacter}
-                  onChange={(e) => setMyCharacter(e.target.value)}
+                  onChange={(e) => {
+                    setMyCharacter(e.target.value);
+                    setPlayerCharacters({...playerCharacters, 'You': e.target.value});
+                  }}
                 >
                   <option value="">Select your character</option>
                   {CLUE_DATA.suspects.map(suspect => (
@@ -487,6 +491,45 @@ export default function BoardBrain() {
                   ))}
                 </select>
               </div>
+              
+              {/* Other Players' Characters */}
+              {numPlayers > 1 && (
+                <div>
+                  <Label className="text-white mb-2 block">Other Players (Optional)</Label>
+                  <div className="space-y-2">
+                    {playerNames.slice(1).map((player, idx) => (
+                      <div key={player} className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
+                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                          value={player.startsWith('Player') ? '' : player}
+                          onChange={(e) => {
+                            const newNames = [...playerNames];
+                            newNames[idx + 1] = e.target.value || `Player ${idx + 2}`;
+                            setPlayerNames(newNames);
+                          }}
+                        />
+                        <select
+                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                          value={playerCharacters[player] || ''}
+                          onChange={(e) => {
+                            setPlayerCharacters({...playerCharacters, [player]: e.target.value});
+                          }}
+                        >
+                          <option value="">Character (optional)</option>
+                          {CLUE_DATA.suspects.map(suspect => (
+                            <option key={suspect} value={suspect}>{suspect}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    Add real names and characters for better tracking during the game
+                  </p>
+                </div>
+              )}
 
               <div>
                 <Label className="text-white mb-2 block">Your Cards (Select {cardsPerPlayer})</Label>
@@ -683,10 +726,24 @@ export default function BoardBrain() {
                           onChange={(e) => setMoveForm({...moveForm, player: e.target.value})}
                         >
                           <option value="">Select player</option>
-                          {playerNames.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
+                          {playerNames.map((name, idx) => {
+                            const isCurrentPlayer = idx === currentTurn % numPlayers;
+                            const characterName = playerCharacters[name] || '';
+                            const displayName = characterName ? `${name} (${characterName.split(' ').pop()})` : name;
+                            return (
+                              <option 
+                                key={name} 
+                                value={name}
+                                disabled={!isCurrentPlayer}
+                              >
+                                {isCurrentPlayer ? `→ ${displayName}` : displayName}
+                              </option>
+                            );
+                          })}
                         </select>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Current turn: {playerNames[currentTurn % numPlayers]}
+                        </p>
                       </div>
                       
                       <div>
@@ -744,10 +801,15 @@ export default function BoardBrain() {
 
                     <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Responses:</p>
-                      {playerNames.filter(p => p !== moveForm.player).map(player => (
-                        <div key={player} className="flex items-center gap-2 mb-2">
-                          <span className="text-sm text-white w-24">{player}:</span>
-                          <select
+                      {playerNames.filter(p => p !== moveForm.player).map(player => {
+                        const characterName = playerCharacters[player] || '';
+                        const shortCharacter = characterName ? characterName.split(' ').pop() : '';
+                        const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
+                        
+                        return (
+                          <div key={player} className="flex items-center gap-2 mb-2">
+                            <span className="text-sm text-white w-32">{displayLabel}:</span>
+                            <select
                             className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
                             value={moveForm.responses.find(r => r.player === player)?.action || ''}
                             onChange={(e) => {
@@ -903,6 +965,57 @@ export default function BoardBrain() {
                 </CardContent>
               </Card>
 
+              {/* Strategic Advice Panel */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    💡 Strategic Advice
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-xs text-slate-400 mb-2">Next Suggestion:</p>
+                      {overallConfidence < 50 ? (
+                        <div className="text-sm text-white">
+                          <p className="mb-2">Test your <strong>highest probability cards</strong> together:</p>
+                          <div className="bg-slate-800 p-2 rounded">
+                            <span className="text-blue-400">{solution.suspect.card || 'Unknown Suspect'}</span>
+                            {' + '}
+                            <span className="text-blue-400">{solution.weapon.card || 'Unknown Weapon'}</span>
+                            {' + '}
+                            <span className="text-blue-400">{solution.room.card || 'Unknown Room'}</span>
+                          </div>
+                        </div>
+                      ) : overallConfidence < 85 ? (
+                        <div className="text-sm text-white">
+                          <p>Focus on <strong>uncertain cards</strong> to eliminate possibilities quickly.</p>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-green-300">
+                          <p><strong>Ready to accuse!</strong> Confidence is high enough.</p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-xs text-slate-400 mb-1">Remaining Possibilities:</p>
+                      <p className="text-2xl font-bold text-white">{probabilities.totalCombinations || 0}</p>
+                      <p className="text-xs text-slate-500">valid vault combinations</p>
+                    </div>
+                    
+                    {moves.length >= 3 && (
+                      <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                        <p className="text-xs text-slate-400 mb-1">Pro Tip:</p>
+                        <p className="text-xs text-slate-300">
+                          Watch for cards that appear in multiple constraints - they're more likely to be held by that player!
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Deduction Grid */}
               <Card className="bg-slate-800 border-slate-700">
                 <CardHeader className="pb-3">
@@ -937,10 +1050,13 @@ export default function BoardBrain() {
                       <thead>
                         <tr className="border-b-2 border-slate-600">
                           <th className="text-left py-2 px-2 text-slate-400 font-semibold">Card</th>
-                          <th className="text-center py-2 px-2 text-slate-400 font-semibold">Me</th>
+                          <th className="text-center py-2 px-2 text-slate-400 font-semibold">
+                            Me
+                            {currentTurn % numPlayers === 0 && <span className="ml-1">→</span>}
+                          </th>
                           {playerNames.slice(1).map((name, idx) => (
                             <th key={name} className="text-center py-2 px-2 text-slate-400 font-semibold">
-                              {name.slice(0,3)}
+                              {idx + 1}
                               {currentTurn % numPlayers === idx + 1 && <span className="ml-1">→</span>}
                             </th>
                           ))}

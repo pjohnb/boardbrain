@@ -869,8 +869,9 @@ export default function BoardBrain() {
                             </select>
                           )}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
+                  </div>
 
                     <Button 
                       type="submit"

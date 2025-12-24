@@ -799,17 +799,14 @@ export default function BoardBrain() {
                       </div>
                     </div>
 
-                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Responses:</p>
-                      {playerNames.filter(p => p !== moveForm.player).map(player => {
-                        const characterName = playerCharacters[player] || '';
-                        const shortCharacter = characterName ? characterName.split(' ').pop() : '';
-                        const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
-                        
-                        return (
-                          <div key={player} className="flex items-center gap-2 mb-2">
-                            <span className="text-sm text-white w-32">{displayLabel}:</span>
-                            <select
+                      {playerNames.filter(p => p !== moveForm.player).map(player => (
+                        <div key={player} className="flex items-center gap-2 mb-2">
+                          <span className="text-sm text-white w-32">
+                            {playerCharacters[player] ? `${player}: ${playerCharacters[player].split(' ').pop()}` : player}:
+                          </span>
+                          <select
                             className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
                             value={moveForm.responses.find(r => r.player === player)?.action || ''}
                             onChange={(e) => {
@@ -831,9 +828,8 @@ export default function BoardBrain() {
                               className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
                               value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
                               onChange={(e) => {
-                                const card = e.target.value;
                                 const newResponses = moveForm.responses.map(r => 
-                                  r.player === player ? {...r, cardShown: card} : r
+                                  r.player === player ? {...r, cardShown: e.target.value} : r
                                 );
                                 setMoveForm({...moveForm, responses: newResponses});
                               }}
@@ -850,7 +846,6 @@ export default function BoardBrain() {
                         </div>
                       ))}
                     </div>
-
                     <Button 
                       type="submit"
                       className="w-full bg-blue-600 hover:bg-blue-700 h-9"

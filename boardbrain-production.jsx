@@ -495,52 +495,38 @@ export default function BoardBrain() {
               {/* Other Players' Characters */}
               {numPlayers > 1 && (
                 <div>
-                  <Label className="text-white mb-2 block">Other Players</Label>
+                  <Label className="text-white mb-2 block">Other Players (Optional)</Label>
                   <div className="space-y-2">
-                    {playerNames.slice(1).map((player, idx) => {
-                      const playerKey = `player_${idx + 2}`; // Use stable key instead of player name
-                      return (
-                        <div key={playerKey} className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
-                            className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                            defaultValue={player.startsWith('Player') ? '' : player}
-                            onBlur={(e) => {
-                              const newName = e.target.value || `Player ${idx + 2}`;
-                              const newNames = [...playerNames];
-                              const oldName = newNames[idx + 1];
-                              newNames[idx + 1] = newName;
-                              
-                              // Preserve character when name changes
-                              if (oldName !== newName && playerCharacters[oldName]) {
-                                const newChars = {...playerCharacters};
-                                newChars[newName] = newChars[oldName];
-                                delete newChars[oldName];
-                                setPlayerCharacters(newChars);
-                              }
-                              
-                              setPlayerNames(newNames);
-                            }}
-                          />
-                          <select
-                            className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                            value={playerCharacters[player] || ''}
-                            onChange={(e) => {
-                              setPlayerCharacters({...playerCharacters, [player]: e.target.value});
-                            }}
-                          >
-                            <option value="">Character (optional)</option>
-                            {CLUE_DATA.suspects.filter(s => s !== myCharacter).map(suspect => (
-                              <option key={suspect} value={suspect}>{suspect}</option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
+                    {playerNames.slice(1).map((player, idx) => (
+                      <div key={player} className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
+                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                          value={player.startsWith('Player') ? '' : player}
+                          onChange={(e) => {
+                            const newNames = [...playerNames];
+                            newNames[idx + 1] = e.target.value || `Player ${idx + 2}`;
+                            setPlayerNames(newNames);
+                          }}
+                        />
+                        <select
+                          className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
+                          value={playerCharacters[player] || ''}
+                          onChange={(e) => {
+                            setPlayerCharacters({...playerCharacters, [player]: e.target.value});
+                          }}
+                        >
+                          <option value="">Character (optional)</option>
+                          {CLUE_DATA.suspects.map(suspect => (
+                            <option key={suspect} value={suspect}>{suspect}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
                   </div>
                   <p className="text-xs text-slate-400 mt-2">
-                    Names and characters help track players during the game
+                    Add real names and characters for better tracking during the game
                   </p>
                 </div>
               )}
@@ -813,16 +799,40 @@ export default function BoardBrain() {
                       </div>
                     </div>
 
-                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Responses:</p>
-                      {playerNames.filter(p => p !== moveForm.player).map(player => (
-                        <div key={player} className="flex items-center gap-2 mb-2">
-                          <span className="text-sm text-white w-32">
-                            {playerCharacters[player] ? `${player}: ${playerCharacters[player].split(' ').pop()}` : player}:
-                          </span>
-                          <select
-                            className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
-                            value={moveForm.responses.find(r => r.player === player)?.action || ''}
+                      <p className="text-xs text-slate-500 mb-2">Players respond in turn order</p>
+                      {playerNames.filter(p => p !== moveForm.player).map((player, playerIdx) => {
+                        const characterName = playerCharacters[player] || '';
+                        const shortCharacter = characterName ? characterName.split(' ').pop() : '';
+                        const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
+                        
+                        // Check if previous player has responded
+                        const previousPlayers = playerNames.filter(p => p !== moveForm.player).slice(0, playerIdx);
+                        const allPreviousResponded = previousPlayers.every(prevPlayer => 
+                          moveForm.responses.some(r => r.player === prevPlayer)
+                        );
+                        
+                        // Check if this player has responded
+                        const thisPlayerResponse = moveForm.responses.find(r => r.player === player);
+                        const hasResponded = !!thisPlayerResponse;
+                        
+                        // Disable if previous players haven't all responded
+                        const isDisabled = !allPreviousResponded;
+                        
+                        return (
+                          <div key={player} className="flex items-center gap-2 mb-2">
+                            <span className={`text-sm w-32 ${isDisabled ? 'text-slate-600' : 'text-white'}`}>
+                              {displayLabel}:
+                            </span>
+                            <select
+                            className={`flex-1 h-8 p-1 rounded border text-xs ${
+                              isDisabled 
+                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed' 
+                                : 'bg-slate-800 border-slate-600 text-white'
+                            }`}
+                            value={thisPlayerResponse?.action || ''}
+                            disabled={isDisabled}
                             onChange={(e) => {
                               const action = e.target.value;
                               const newResponses = moveForm.responses.filter(r => r.player !== player);
@@ -832,18 +842,19 @@ export default function BoardBrain() {
                               setMoveForm({...moveForm, responses: newResponses});
                             }}
                           >
-                            <option value="">Response</option>
+                            <option value="">{isDisabled ? 'Waiting...' : 'Response'}</option>
                             <option value="PASS">Passed</option>
                             <option value="SHOW">Showed Card</option>
                           </select>
                           
-                          {moveForm.responses.find(r => r.player === player)?.action === 'SHOW' && player === 'You' && (
+                          {thisPlayerResponse?.action === 'SHOW' && player === 'You' && (
                             <select
                               className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
-                              value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
+                              value={thisPlayerResponse?.cardShown || ''}
                               onChange={(e) => {
+                                const card = e.target.value;
                                 const newResponses = moveForm.responses.map(r => 
-                                  r.player === player ? {...r, cardShown: e.target.value} : r
+                                  r.player === player ? {...r, cardShown: card} : r
                                 );
                                 setMoveForm({...moveForm, responses: newResponses});
                               }}
@@ -860,10 +871,11 @@ export default function BoardBrain() {
                         </div>
                       ))}
                     </div>
+
                     <Button 
                       type="submit"
                       className="w-full bg-blue-600 hover:bg-blue-700 h-9"
-                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon}
+                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon || !moveForm.room}
                     >
                       Log This Move
                     </Button>
@@ -1057,6 +1069,19 @@ export default function BoardBrain() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs border-collapse">
                       <thead>
+                        {/* Header row with "PLAYERS" label */}
+                        <tr className="border-b border-slate-700">
+                          <th className="text-left py-1 px-2"></th>
+                          <th 
+                            colSpan={numPlayers} 
+                            className="text-center py-1 px-2 text-slate-500 uppercase text-xs font-semibold tracking-wider"
+                          >
+                            Players
+                          </th>
+                          <th className="text-center py-1 px-2"></th>
+                          <th className="text-center py-1 px-2"></th>
+                        </tr>
+                        {/* Column headers */}
                         <tr className="border-b-2 border-slate-600">
                           <th className="text-left py-2 px-2 text-slate-400 font-semibold">Card</th>
                           <th className="text-center py-2 px-2 text-slate-400 font-semibold">

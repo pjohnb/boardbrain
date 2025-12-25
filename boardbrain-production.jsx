@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Textarea, Alert, AlertDescription, Checkbox } from './ui-components';
 
 /**
  * BoardBrain™ - More Brain. Better Game.
  * © 2024 Xformative AI LLC. All Rights Reserved.
+ * 
+ * PERFORMANCE FIX: Added useMemo to prevent expensive calculations on every keystroke
  */
 
 // ============================================================================
@@ -304,25 +306,41 @@ export default function BoardBrain() {
     setConstraints([...constraints, ...newConstraints]);
   }, [moves, cspSolver]);
   
-  // Calculate probabilities using CSP solver
-  const probabilities = cspSolver ? cspSolver.calculateProbabilities() : {
-    suspects: {},
-    weapons: {},
-    rooms: {},
-    totalCombinations: 324 // Initial total
-  };
+  // ============================================================================
+  // PERFORMANCE FIX: Memoize expensive calculations
+  // These only recalculate when cspSolver or moves change, NOT on every keystroke
+  // ============================================================================
   
-  // Get most likely solution from CSP solver
-  const solution = cspSolver ? cspSolver.getMostLikelySolution() : {
-    suspect: { card: null, prob: 0 },
-    weapon: { card: null, prob: 0 },
-    room: { card: null, prob: 0 },
-    totalCombinations: 324
-  };
+  const probabilities = useMemo(() => {
+    if (!cspSolver) {
+      return {
+        suspects: {},
+        weapons: {},
+        rooms: {},
+        totalCombinations: 324 // Initial total
+      };
+    }
+    return cspSolver.calculateProbabilities();
+  }, [cspSolver, moves.length]); // Only recalculate when solver exists or moves change
   
-  const overallConfidence = solution.suspect.prob && solution.weapon.prob && solution.room.prob
-    ? Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3)
-    : 0;
+  const solution = useMemo(() => {
+    if (!cspSolver) {
+      return {
+        suspect: { card: null, prob: 0 },
+        weapon: { card: null, prob: 0 },
+        room: { card: null, prob: 0 },
+        totalCombinations: 324
+      };
+    }
+    return cspSolver.getMostLikelySolution();
+  }, [cspSolver, moves.length]); // Only recalculate when solver exists or moves change
+  
+  const overallConfidence = useMemo(() => {
+    if (solution.suspect.prob && solution.weapon.prob && solution.room.prob) {
+      return Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3);
+    }
+    return 0;
+  }, [solution]);
   
   // Handle move submission
   const handleAddMove = (e) => {
@@ -503,8 +521,8 @@ export default function BoardBrain() {
                           type="text"
                           placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
                           className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                          value={player.startsWith('Player') ? '' : player}
-                          onChange={(e) => {
+                          defaultValue={player.startsWith('Player') ? '' : player}
+                          onBlur={(e) => {
                             const newNames = [...playerNames];
                             newNames[idx + 1] = e.target.value || `Player ${idx + 2}`;
                             setPlayerNames(newNames);
@@ -801,38 +819,17 @@ export default function BoardBrain() {
 
                     <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Responses:</p>
-                      <p className="text-xs text-slate-500 mb-2">Players respond in turn order</p>
-                      {playerNames.filter(p => p !== moveForm.player).map((player, playerIdx) => {
+                      {playerNames.filter(p => p !== moveForm.player).map(player => {
                         const characterName = playerCharacters[player] || '';
                         const shortCharacter = characterName ? characterName.split(' ').pop() : '';
                         const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
                         
-                        // Check if previous player has responded
-                        const previousPlayers = playerNames.filter(p => p !== moveForm.player).slice(0, playerIdx);
-                        const allPreviousResponded = previousPlayers.every(prevPlayer => 
-                          moveForm.responses.some(r => r.player === prevPlayer)
-                        );
-                        
-                        // Check if this player has responded
-                        const thisPlayerResponse = moveForm.responses.find(r => r.player === player);
-                        const hasResponded = !!thisPlayerResponse;
-                        
-                        // Disable if previous players haven't all responded
-                        const isDisabled = !allPreviousResponded;
-                        
                         return (
                           <div key={player} className="flex items-center gap-2 mb-2">
-                            <span className={`text-sm w-32 ${isDisabled ? 'text-slate-600' : 'text-white'}`}>
-                              {displayLabel}:
-                            </span>
+                            <span className="text-sm text-white w-32">{displayLabel}:</span>
                             <select
-                            className={`flex-1 h-8 p-1 rounded border text-xs ${
-                              isDisabled 
-                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed' 
-                                : 'bg-slate-800 border-slate-600 text-white'
-                            }`}
-                            value={thisPlayerResponse?.action || ''}
-                            disabled={isDisabled}
+                            className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
+                            value={moveForm.responses.find(r => r.player === player)?.action || ''}
                             onChange={(e) => {
                               const action = e.target.value;
                               const newResponses = moveForm.responses.filter(r => r.player !== player);
@@ -842,15 +839,15 @@ export default function BoardBrain() {
                               setMoveForm({...moveForm, responses: newResponses});
                             }}
                           >
-                            <option value="">{isDisabled ? 'Waiting...' : 'Response'}</option>
+                            <option value="">Response</option>
                             <option value="PASS">Passed</option>
                             <option value="SHOW">Showed Card</option>
                           </select>
                           
-                          {thisPlayerResponse?.action === 'SHOW' && player === 'You' && (
+                          {moveForm.responses.find(r => r.player === player)?.action === 'SHOW' && player === 'You' && (
                             <select
                               className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
-                              value={thisPlayerResponse?.cardShown || ''}
+                              value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
                               onChange={(e) => {
                                 const card = e.target.value;
                                 const newResponses = moveForm.responses.map(r => 
@@ -869,14 +866,13 @@ export default function BoardBrain() {
                             </select>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      )})}
+                    </div>
 
                     <Button 
                       type="submit"
                       className="w-full bg-blue-600 hover:bg-blue-700 h-9"
-                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon || !moveForm.room}
+                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon}
                     >
                       Log This Move
                     </Button>
@@ -921,78 +917,62 @@ export default function BoardBrain() {
               {/* Solution Prediction */}
               <Card className="bg-slate-800 border-slate-700">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg text-white flex items-center gap-2">
-                    🧠 AI Analysis
-                  </CardTitle>
+                  <CardTitle className="text-lg text-white">🎯 Most Likely Solution</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm text-slate-400">Overall Confidence</span>
-                        <span className="text-2xl font-bold text-white">{overallConfidence}%</span>
-                      </div>
-                      <div className="w-full bg-slate-700 rounded-full h-2">
-                        <div 
-                          className="bg-blue-600 h-2 rounded-full transition-all"
-                          style={{width: `${overallConfidence}%`}}
-                        />
-                      </div>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
+                      <p className="text-xs text-slate-400 mb-1">Suspect</p>
+                      <p className="text-sm text-white font-semibold">{solution.suspect.card || '?'}</p>
+                      <p className={`text-lg font-bold ${solution.suspect.prob >= 80 ? 'text-green-400' : solution.suspect.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                        {solution.suspect.prob}%
+                      </p>
                     </div>
-
-                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
-                      <p className="text-sm text-slate-400 mb-2">Most Likely Solution:</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-white text-sm">Suspect:</span>
-                          <span className="text-blue-400 font-semibold text-sm">
-                            {solution.suspect.card || 'Unknown'} ({solution.suspect.prob}%)
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-white text-sm">Weapon:</span>
-                          <span className="text-blue-400 font-semibold text-sm">
-                            {solution.weapon.card || 'Unknown'} ({solution.weapon.prob}%)
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-white text-sm">Room:</span>
-                          <span className="text-blue-400 font-semibold text-sm">
-                            {solution.room.card || 'Unknown'} ({solution.room.prob}%)
-                          </span>
-                        </div>
-                      </div>
+                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
+                      <p className="text-xs text-slate-400 mb-1">Weapon</p>
+                      <p className="text-sm text-white font-semibold">{solution.weapon.card || '?'}</p>
+                      <p className={`text-lg font-bold ${solution.weapon.prob >= 80 ? 'text-green-400' : solution.weapon.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                        {solution.weapon.prob}%
+                      </p>
                     </div>
-
-                    {overallConfidence >= 85 ? (
-                      <Alert className="bg-green-900 border-green-700">
-                        <AlertDescription className="text-green-200 text-sm">
-                          <strong>HIGH CONFIDENCE!</strong> You should consider making your accusation.
-                        </AlertDescription>
-                      </Alert>
-                    ) : overallConfidence >= 70 ? (
-                      <Alert className="bg-yellow-900 border-yellow-700">
-                        <AlertDescription className="text-yellow-200 text-sm">
-                          <strong>GETTING CLOSE.</strong> Gather a bit more information before accusing.
-                        </AlertDescription>
-                      </Alert>
-                    ) : (
-                      <Alert className="bg-slate-900 border-slate-700">
-                        <AlertDescription className="text-slate-400 text-sm">
-                          Keep gathering information. Make strategic suggestions to narrow down possibilities.
-                        </AlertDescription>
-                      </Alert>
-                    )}
+                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
+                      <p className="text-xs text-slate-400 mb-1">Room</p>
+                      <p className="text-sm text-white font-semibold">{solution.room.card || '?'}</p>
+                      <p className={`text-lg font-bold ${solution.room.prob >= 80 ? 'text-green-400' : solution.room.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                        {solution.room.prob}%
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Overall Confidence:</span>
+                      <span className={`text-xl font-bold ${overallConfidence >= 80 ? 'text-green-400' : overallConfidence >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                        {overallConfidence}%
+                      </span>
+                    </div>
+                    <div className="mt-2 bg-slate-800 rounded-full h-3 overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ${
+                          overallConfidence >= 80 ? 'bg-green-500' : 
+                          overallConfidence >= 50 ? 'bg-yellow-500' : 'bg-slate-600'
+                        }`}
+                        style={{ width: `${overallConfidence}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2 text-center">
+                      {overallConfidence >= 85 ? '🎯 Ready to make an accusation!' : 
+                       overallConfidence >= 60 ? '📊 Getting closer...' : 
+                       '🔍 Keep gathering information'}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Strategic Advice Panel */}
+              {/* Strategy Tips */}
               <Card className="bg-slate-800 border-slate-700">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg text-white flex items-center gap-2">
-                    💡 Strategic Advice
-                  </CardTitle>
+                  <CardTitle className="text-lg text-white">💡 Strategy Tips</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
@@ -1070,19 +1050,6 @@ export default function BoardBrain() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs border-collapse">
                       <thead>
-                        {/* Header row with "PLAYERS" label */}
-                        <tr className="border-b border-slate-700">
-                          <th className="text-left py-1 px-2"></th>
-                          <th 
-                            colSpan={numPlayers} 
-                            className="text-center py-1 px-2 text-slate-500 uppercase text-xs font-semibold tracking-wider"
-                          >
-                            Players
-                          </th>
-                          <th className="text-center py-1 px-2"></th>
-                          <th className="text-center py-1 px-2"></th>
-                        </tr>
-                        {/* Column headers */}
                         <tr className="border-b-2 border-slate-600">
                           <th className="text-left py-2 px-2 text-slate-400 font-semibold">Card</th>
                           <th className="text-center py-2 px-2 text-slate-400 font-semibold">

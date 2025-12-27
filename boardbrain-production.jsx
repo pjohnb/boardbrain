@@ -166,7 +166,6 @@ export default function BoardBrain() {
       responses: {}
     });
   };
-  };
 
   const logCardReveal = () => {
     const { card, player } = revealInput;

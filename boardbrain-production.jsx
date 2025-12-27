@@ -260,24 +260,31 @@ export default function BoardBrain() {
                   <div className="mb-4">
                     <p className="text-xs text-slate-400 mb-2">SUSPECTS</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {CLUE_DATA.suspects.map(card => (
-                        <label key={card} className="flex items-center space-x-2 text-sm">
-                          <Checkbox
-                            checked={myCards.includes(card)}
-                            disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setMyCards([...myCards, card]);
-                              } else {
-                                setMyCards(myCards.filter(c => c !== card));
-                              }
-                            }}
-                          />
-                          <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-500' : 'text-slate-200'}>
-                            {card}
-                          </span>
-                        </label>
-                      ))}
+                      {CLUE_DATA.suspects.map(card => {
+                        const isSelected = myCards.includes(card);
+                        const isDisabled = !isSelected && myCards.length >= cardsPerPlayer;
+                        
+                        return (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={isSelected}
+                              disabled={isDisabled}
+                              onCheckedChange={() => {
+                                if (isSelected) {
+                                  // Currently selected, so remove it
+                                  setMyCards(myCards.filter(c => c !== card));
+                                } else {
+                                  // Currently not selected, so add it
+                                  setMyCards([...myCards, card]);
+                                }
+                              }}
+                            />
+                            <span className={isDisabled ? 'text-slate-500' : 'text-slate-200'}>
+                              {card}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -285,24 +292,29 @@ export default function BoardBrain() {
                   <div className="mb-4">
                     <p className="text-xs text-slate-400 mb-2">WEAPONS</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {CLUE_DATA.weapons.map(card => (
-                        <label key={card} className="flex items-center space-x-2 text-sm">
-                          <Checkbox
-                            checked={myCards.includes(card)}
-                            disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setMyCards([...myCards, card]);
-                              } else {
-                                setMyCards(myCards.filter(c => c !== card));
-                              }
-                            }}
-                          />
-                          <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-500' : 'text-slate-200'}>
-                            {card}
-                          </span>
-                        </label>
-                      ))}
+                      {CLUE_DATA.weapons.map(card => {
+                        const isSelected = myCards.includes(card);
+                        const isDisabled = !isSelected && myCards.length >= cardsPerPlayer;
+                        
+                        return (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={isSelected}
+                              disabled={isDisabled}
+                              onCheckedChange={() => {
+                                if (isSelected) {
+                                  setMyCards(myCards.filter(c => c !== card));
+                                } else {
+                                  setMyCards([...myCards, card]);
+                                }
+                              }}
+                            />
+                            <span className={isDisabled ? 'text-slate-500' : 'text-slate-200'}>
+                              {card}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -310,24 +322,29 @@ export default function BoardBrain() {
                   <div className="mb-4">
                     <p className="text-xs text-slate-400 mb-2">ROOMS</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {CLUE_DATA.rooms.map(card => (
-                        <label key={card} className="flex items-center space-x-2 text-sm">
-                          <Checkbox
-                            checked={myCards.includes(card)}
-                            disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setMyCards([...myCards, card]);
-                              } else {
-                                setMyCards(myCards.filter(c => c !== card));
-                              }
-                            }}
-                          />
-                          <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-500' : 'text-slate-200'}>
-                            {card}
-                          </span>
-                        </label>
-                      ))}
+                      {CLUE_DATA.rooms.map(card => {
+                        const isSelected = myCards.includes(card);
+                        const isDisabled = !isSelected && myCards.length >= cardsPerPlayer;
+                        
+                        return (
+                          <label key={card} className="flex items-center space-x-2 text-sm">
+                            <Checkbox
+                              checked={isSelected}
+                              disabled={isDisabled}
+                              onCheckedChange={() => {
+                                if (isSelected) {
+                                  setMyCards(myCards.filter(c => c !== card));
+                                } else {
+                                  setMyCards([...myCards, card]);
+                                }
+                              }}
+                            />
+                            <span className={isDisabled ? 'text-slate-500' : 'text-slate-200'}>
+                              {card}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -344,24 +361,29 @@ export default function BoardBrain() {
                     Public/Remainder Cards (Select {remainderCount})
                   </Label>
                   <div className="space-y-2">
-                    {ALL_CARDS.filter(card => !myCards.includes(card)).map(card => (
-                      <label key={card} className="flex items-center space-x-2 text-sm">
-                        <Checkbox
-                          checked={remainderCards.includes(card)}
-                          disabled={!remainderCards.includes(card) && remainderCards.length >= remainderCount}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setRemainderCards([...remainderCards, card]);
-                            } else {
-                              setRemainderCards(remainderCards.filter(c => c !== card));
-                            }
-                          }}
-                        />
-                        <span className={!remainderCards.includes(card) && remainderCards.length >= remainderCount ? 'text-slate-500' : 'text-slate-200'}>
-                          {card}
-                        </span>
-                      </label>
-                    ))}
+                    {ALL_CARDS.filter(card => !myCards.includes(card)).map(card => {
+                      const isSelected = remainderCards.includes(card);
+                      const isDisabled = !isSelected && remainderCards.length >= remainderCount;
+                      
+                      return (
+                        <label key={card} className="flex items-center space-x-2 text-sm">
+                          <Checkbox
+                            checked={isSelected}
+                            disabled={isDisabled}
+                            onCheckedChange={() => {
+                              if (isSelected) {
+                                setRemainderCards(remainderCards.filter(c => c !== card));
+                              } else {
+                                setRemainderCards([...remainderCards, card]);
+                              }
+                            }}
+                          />
+                          <span className={isDisabled ? 'text-slate-500' : 'text-slate-200'}>
+                            {card}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                   <p className="text-sm text-slate-400 mt-2">
                     Selected: {remainderCards.length}/{remainderCount}

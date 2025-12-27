@@ -580,7 +580,7 @@ export default function BoardBrain() {
                       <div className="grid grid-cols-2 gap-2">
                         {CLUE_DATA.suspects.map(card => (
                           <label key={card} className="flex items-center space-x-2 text-sm">
-                            <Checkbox
+                           <Checkbox
                               checked={myCards.includes(card)}
                               disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
                               onCheckedChange={(checked) => {

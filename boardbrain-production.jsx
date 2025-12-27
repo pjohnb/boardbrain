@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 /**
  * BoardBrain™ - Clue Deduction Assistant
- * Copyright © 2024 Pat Bouldin. All Rights Reserved.
+ * Copyright © 2024 Pat Boulay. All Rights Reserved.
  * 
  * More Brain. Better Game.
  * Your AI Strategy Partner for Board Games
@@ -31,9 +31,17 @@ export default function BoardBrain() {
   
   // Game state
   const [currentTurn, setCurrentTurn] = useState(1);
+  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0); // Whose turn is it
   const [moves, setMoves] = useState([]);
   const [knowledgeMatrix, setKnowledgeMatrix] = useState({});
   const [probabilities, setProbabilities] = useState({});
+  const [previousProbabilities, setPreviousProbabilities] = useState({}); // Track changes
+  
+  // Constraint tracking
+  const [constraints, setConstraints] = useState([]); // {turn, player, cards: [3 cards], showedBy}
+  const [suggestionFrequency, setSuggestionFrequency] = useState({}); // Track how often each player suggests each card
+  const [playerLocations, setPlayerLocations] = useState({}); // {playerName: roomName}
+  const [recentInsights, setRecentInsights] = useState([]); // Deduction explanations
   
   // Move input state
   const [moveInput, setMoveInput] = useState({
@@ -58,6 +66,19 @@ export default function BoardBrain() {
   useEffect(() => {
     if (gamePhase === 'playing' && Object.keys(knowledgeMatrix).length === 0) {
       initializeKnowledgeMatrix();
+    }
+  }, [gamePhase]);
+  
+  // Initialize first player when game starts
+  useEffect(() => {
+    if (gamePhase === 'playing' && moveInput.suggester === '' && players.length > 0) {
+      setMoveInput({
+        suggester: players[0].name,
+        suspect: '',
+        weapon: '',
+        room: '',
+        responses: {}
+      });
     }
   }, [gamePhase]);
 
@@ -87,24 +108,103 @@ export default function BoardBrain() {
     calculateProbabilities(matrix);
   };
 
-  const calculateProbabilities = (matrix) => {
+  const calculateProbabilities = (matrix, currentConstraints = constraints, suggestionFreq = suggestionFrequency) => {
     const probs = {
       suspects: {},
       weapons: {},
       rooms: {}
     };
     
-    // Calculate for each category
+    const insights = [];
+    
+    // Calculate base probabilities for each category
     ['suspects', 'weapons', 'rooms'].forEach(category => {
       const cards = CLUE_DATA[category];
       const possibleCards = cards.filter(card => matrix[card]?.solution !== 'NO');
       
       possibleCards.forEach(card => {
-        probs[category][card] = possibleCards.length > 0 ? (1 / possibleCards.length * 100).toFixed(1) : 0;
+        let baseProb = possibleCards.length > 0 ? (1 / possibleCards.length) : 0;
+        
+        // CONSTRAINT SATISFACTION: Adjust based on "showed card" constraints
+        let adjustedProb = baseProb;
+        
+        // Count how many constraints involve this card
+        const relevantConstraints = currentConstraints.filter(c => 
+          c.cards.includes(card) && c.showedBy
+        );
+        
+        if (relevantConstraints.length > 0) {
+          // Card was in suggestions where someone showed a card
+          // This slightly reduces probability it's in solution
+          const reductionFactor = 1 - (relevantConstraints.length * 0.05);
+          adjustedProb = baseProb * Math.max(reductionFactor, 0.3);
+        }
+        
+        // FREQUENCY DETECTION: Check if players repeatedly suggest this card
+        let maxFrequency = 0;
+        let frequentPlayer = null;
+        
+        players.forEach(player => {
+          const freq = suggestionFreq[player.name]?.[card] || 0;
+          if (freq > maxFrequency) {
+            maxFrequency = freq;
+            frequentPlayer = player.name;
+          }
+        });
+        
+        // If a player suggests a card 3+ times, they likely have it
+        if (maxFrequency >= 3) {
+          // Reduce solution probability significantly
+          adjustedProb = adjustedProb * 0.2;
+          
+          // Generate insight
+          const confidence = Math.min(maxFrequency * 20, 95);
+          if (maxFrequency >= 3) {
+            insights.push({
+              type: 'frequency',
+              card: card,
+              player: frequentPlayer,
+              frequency: maxFrequency,
+              confidence: confidence,
+              message: `${frequentPlayer} likely holds ${card} (suggested ${maxFrequency}x, ${confidence}% confidence)`
+            });
+          }
+        }
+        
+        probs[category][card] = (adjustedProb * 100).toFixed(1);
       });
     });
     
+    // Detect probability changes and generate insights
+    if (Object.keys(previousProbabilities).length > 0) {
+      ['suspects', 'weapons', 'rooms'].forEach(category => {
+        Object.keys(probs[category] || {}).forEach(card => {
+          const oldProb = parseFloat(previousProbabilities[category]?.[card] || 0);
+          const newProb = parseFloat(probs[category][card]);
+          const change = newProb - oldProb;
+          
+          // Significant change (>15% shift)
+          if (Math.abs(change) > 15) {
+            insights.push({
+              type: 'probability_shift',
+              card: card,
+              oldProb: oldProb.toFixed(1),
+              newProb: newProb.toFixed(1),
+              change: change.toFixed(1),
+              message: `${card}: ${oldProb.toFixed(0)}% → ${newProb.toFixed(0)}% (${change > 0 ? '+' : ''}${change.toFixed(0)}%)`
+            });
+          }
+        });
+      });
+    }
+    
+    setPreviousProbabilities(probs);
     setProbabilities(probs);
+    
+    // Keep only recent insights (last 5)
+    if (insights.length > 0) {
+      setRecentInsights(prev => [...insights, ...prev].slice(0, 5));
+    }
   };
 
   const startPlaying = () => {
@@ -118,10 +218,28 @@ export default function BoardBrain() {
     
     if (!suggester || !suspect || !weapon || !room) return;
     
-    // Process responses
-    const newMatrix = { ...knowledgeMatrix };
+    const suggestedCards = [suspect, weapon, room];
     
-    // Find suggester index
+    // UPDATE SUGGESTION FREQUENCY (for detecting when players hold cards)
+    const newFrequency = { ...suggestionFrequency };
+    if (!newFrequency[suggester]) {
+      newFrequency[suggester] = {};
+    }
+    suggestedCards.forEach(card => {
+      newFrequency[suggester][card] = (newFrequency[suggester][card] || 0) + 1;
+    });
+    setSuggestionFrequency(newFrequency);
+    
+    // UPDATE PLAYER LOCATION (suggester moved to this room)
+    const newLocations = { ...playerLocations };
+    newLocations[suggester] = room;
+    setPlayerLocations(newLocations);
+    
+    // Process responses and update knowledge matrix
+    const newMatrix = { ...knowledgeMatrix };
+    const newConstraints = [...constraints];
+    
+    // Find suggester index for response order
     const suggesterIndex = players.findIndex(p => p.name === suggester);
     
     // Create response order (players clockwise from suggester)
@@ -130,17 +248,72 @@ export default function BoardBrain() {
       ...players.slice(0, suggesterIndex)
     ];
     
+    let constraintCreated = false;
+    
     responseOrder.forEach(player => {
       const response = responses[player.name];
       
       if (response === 'passed') {
         // Player doesn't have any of the three cards
-        [suspect, weapon, room].forEach(card => {
+        suggestedCards.forEach(card => {
           newMatrix[card][player.name] = 'NO';
         });
-      } else if (response === 'showed') {
-        // Player showed a card (we know they have at least one)
-        // This creates a constraint but we need more info about which card
+      } else if (response === 'showed' && !constraintCreated) {
+        // CREATE CONSTRAINT: Player showed one of these 3 cards (but we don't know which)
+        newConstraints.push({
+          turn: currentTurn,
+          suggester: suggester,
+          cards: suggestedCards,
+          showedBy: player.name,
+          timestamp: new Date().toISOString()
+        });
+        constraintCreated = true;
+        
+        // CONSTRAINT PROPAGATION: Try to deduce which card was shown
+        // If player is eliminated from 2 of the 3 cards, they MUST have the 3rd
+        const possibleCards = suggestedCards.filter(card => 
+          newMatrix[card][player.name] !== 'NO'
+        );
+        
+        if (possibleCards.length === 1) {
+          // DEDUCTION! Player must have this specific card
+          const deducedCard = possibleCards[0];
+          newMatrix[deducedCard][player.name] = 'HAS';
+          newMatrix[deducedCard].solution = 'NO';
+          
+          // Generate insight
+          setRecentInsights(prev => [{
+            type: 'constraint_resolution',
+            card: deducedCard,
+            player: player.name,
+            turn: currentTurn,
+            message: `${player.name} MUST have ${deducedCard} (only option from Turn ${currentTurn} suggestion)`
+          }, ...prev].slice(0, 5));
+        }
+      }
+    });
+    
+    // PROPAGATE CONSTRAINTS: Re-check all previous constraints with new knowledge
+    newConstraints.forEach(constraint => {
+      const player = constraint.showedBy;
+      const possibleCards = constraint.cards.filter(card => 
+        newMatrix[card][player] !== 'NO'
+      );
+      
+      if (possibleCards.length === 1 && newMatrix[possibleCards[0]][player] !== 'HAS') {
+        // CASCADING DEDUCTION! 
+        const deducedCard = possibleCards[0];
+        newMatrix[deducedCard][player] = 'HAS';
+        newMatrix[deducedCard].solution = 'NO';
+        
+        setRecentInsights(prev => [{
+          type: 'cascading_deduction',
+          card: deducedCard,
+          player: player,
+          originalTurn: constraint.turn,
+          currentTurn: currentTurn,
+          message: `${player} MUST have ${deducedCard} (constraint from Turn ${constraint.turn} now resolved)`
+        }, ...prev].slice(0, 5));
       }
     });
     
@@ -149,20 +322,29 @@ export default function BoardBrain() {
       suggester,
       suggestion: { suspect, weapon, room },
       responses,
+      location: room,
       timestamp: new Date().toISOString()
     };
     
     setMoves([...moves, newMove]);
+    setConstraints(newConstraints);
     setKnowledgeMatrix(newMatrix);
-    calculateProbabilities(newMatrix);
+    calculateProbabilities(newMatrix, newConstraints, newFrequency);
     setCurrentTurn(currentTurn + 1);
     
-    // Reset move input
+    // ADVANCE TO NEXT PLAYER'S TURN
+    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
+    setCurrentPlayerIndex(nextPlayerIndex);
+    
+    // Reset move input BUT pre-fill next player and their location
+    const nextPlayer = players[nextPlayerIndex].name;
+    const nextPlayerRoom = newLocations[nextPlayer] || '';
+    
     setMoveInput({
-      suggester: '',
+      suggester: nextPlayer,
       suspect: '',
       weapon: '',
-      room: '',
+      room: nextPlayerRoom, // Auto-fill room from last known location
       responses: {}
     });
   };
@@ -281,18 +463,21 @@ export default function BoardBrain() {
     },
     table: {
       width: '100%',
-      fontSize: '0.75rem',
+      fontSize: '1.5rem', // DOUBLED from 0.75rem
       borderCollapse: 'collapse'
     },
     th: {
-      padding: '0.5rem',
+      padding: '0.25rem', // TIGHTER from 0.5rem
       borderBottom: '1px solid #334155',
-      color: '#cbd5e1'
+      color: '#cbd5e1',
+      fontSize: '1.5rem', // DOUBLED
+      fontWeight: 'bold'
     },
     td: {
-      padding: '0.5rem',
+      padding: '0.25rem', // TIGHTER from 0.5rem
       borderBottom: '1px solid #1e293b',
-      textAlign: 'center'
+      textAlign: 'center',
+      fontSize: '1.5rem' // DOUBLED
     }
   };
 
@@ -717,7 +902,7 @@ export default function BoardBrain() {
           <div style={{ ...styles.header, marginBottom: '1.5rem' }}>
             <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-              Turn {currentTurn} • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
+              Turn {currentTurn} • {players[currentPlayerIndex]?.name}'s Turn • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
             </p>
           </div>
 
@@ -725,6 +910,30 @@ export default function BoardBrain() {
             {/* Deduction Grid */}
             <div style={styles.card}>
               <h3 style={{ marginBottom: '1rem', fontSize: '1.25rem' }}>Deduction Grid</h3>
+              
+              {/* Legend */}
+              <div style={{ 
+                marginBottom: '1rem', 
+                padding: '0.75rem', 
+                backgroundColor: '#0f172a', 
+                borderRadius: '0.375rem',
+                fontSize: '0.875rem'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#cbd5e1' }}>Legend:</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', color: '#94a3b8' }}>
+                  <div><span style={{ color: '#4ade80' }}>✓</span> = Has card</div>
+                  <div><span style={{ color: '#f87171' }}>✗</span> = Doesn't have</div>
+                  <div><span style={{ color: '#fbbf24' }}>⊕</span> = Likely holds (3+ suggestions)</div>
+                  <div><span style={{ color: '#64748b' }}>?</span> = Unknown</div>
+                  <div><span style={{ color: '#fbbf24' }}>★</span> = In solution</div>
+                  <div><span style={{ fontSize: '0.75rem' }}>²</span> = Suggestion count</div>
+                  <div><span style={{ color: '#4ade80' }}>80%+</span> = Very likely</div>
+                  <div><span style={{ color: '#fbbf24' }}>50-79%</span> = Moderate</div>
+                  <div><span style={{ color: '#fb923c' }}>20-49%</span> = Lower</div>
+                  <div>↑↓ = Recent change</div>
+                </div>
+              </div>
+              
               <div style={{ overflowX: 'auto' }}>
                 <table style={styles.table}>
                   <thead>
@@ -750,17 +959,29 @@ export default function BoardBrain() {
                         {CLUE_DATA[category].map(card => (
                           <tr key={card}>
                             <td style={{ ...styles.td, textAlign: 'left', color: '#e2e8f0' }}>{card}</td>
-                            {players.map(p => (
-                              <td key={p.name} style={styles.td}>
-                                <span style={{
-                                  color: knowledgeMatrix[card]?.[p.name] === 'HAS' ? '#4ade80' :
-                                         knowledgeMatrix[card]?.[p.name] === 'NO' ? '#f87171' : '#64748b'
-                                }}>
-                                  {knowledgeMatrix[card]?.[p.name] === 'HAS' ? '✓' :
-                                   knowledgeMatrix[card]?.[p.name] === 'NO' ? '✗' : '?'}
-                                </span>
-                              </td>
-                            ))}
+                            {players.map(p => {
+                              const freq = suggestionFrequency[p.name]?.[card] || 0;
+                              const likelyHolds = freq >= 3;
+                              
+                              return (
+                                <td key={p.name} style={styles.td}>
+                                  <span style={{
+                                    color: knowledgeMatrix[card]?.[p.name] === 'HAS' ? '#4ade80' :
+                                           knowledgeMatrix[card]?.[p.name] === 'NO' ? '#f87171' : 
+                                           likelyHolds ? '#fbbf24' : '#64748b'
+                                  }}>
+                                    {knowledgeMatrix[card]?.[p.name] === 'HAS' ? '✓' :
+                                     knowledgeMatrix[card]?.[p.name] === 'NO' ? '✗' :
+                                     likelyHolds ? '⊕' : '?'}
+                                  </span>
+                                  {freq > 0 && (
+                                    <span style={{ fontSize: '0.65rem', color: '#64748b', marginLeft: '2px' }}>
+                                      {freq}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
                             <td style={styles.td}>
                               <span style={{
                                 color: knowledgeMatrix[card]?.solution === 'YES' ? '#fbbf24' :
@@ -770,8 +991,33 @@ export default function BoardBrain() {
                                  knowledgeMatrix[card]?.solution === 'NO' ? '✗' : '?'}
                               </span>
                             </td>
-                            <td style={{ ...styles.td, color: '#cbd5e1' }}>
-                              {probabilities[category]?.[card] || '0.0'}
+                            <td style={styles.td}>
+                              {(() => {
+                                const prob = parseFloat(probabilities[category]?.[card] || 0);
+                                const prevProb = parseFloat(previousProbabilities[category]?.[card] || prob);
+                                const change = prob - prevProb;
+                                
+                                // Color based on probability (high = green, med = yellow, low = gray)
+                                let color = '#64748b'; // Default gray
+                                if (prob >= 80) color = '#4ade80'; // Bright green - very likely solution
+                                else if (prob >= 50) color = '#fbbf24'; // Yellow - moderate
+                                else if (prob >= 20) color = '#fb923c'; // Orange - lower
+                                
+                                // Arrow indicator for significant changes
+                                let arrow = '';
+                                if (Math.abs(change) > 10) {
+                                  arrow = change > 0 ? ' ↑' : ' ↓';
+                                }
+                                
+                                return (
+                                  <span style={{ 
+                                    color: color,
+                                    fontWeight: prob >= 70 ? 'bold' : 'normal'
+                                  }}>
+                                    {prob.toFixed(0)}%{arrow}
+                                  </span>
+                                );
+                              })()}
                             </td>
                           </tr>
                         ))}
@@ -784,6 +1030,47 @@ export default function BoardBrain() {
 
             {/* Right Column */}
             <div>
+              {/* Recent Insights Panel */}
+              {recentInsights.length > 0 && (
+                <div style={styles.card}>
+                  <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem' }}>💡 Recent Insights</h3>
+                  <div style={{ 
+                    maxHeight: '250px', 
+                    overflowY: 'auto',
+                    fontSize: '0.875rem'
+                  }}>
+                    {recentInsights.map((insight, idx) => (
+                      <div 
+                        key={idx}
+                        style={{
+                          padding: '0.75rem',
+                          marginBottom: '0.5rem',
+                          backgroundColor: '#0f172a',
+                          borderRadius: '0.375rem',
+                          borderLeft: insight.type === 'frequency' ? '3px solid #fbbf24' : 
+                                     insight.type === 'probability_shift' ? '3px solid #60a5fa' :
+                                     '3px solid #4ade80'
+                        }}
+                      >
+                        <div style={{ color: '#cbd5e1', fontWeight: '500' }}>
+                          {insight.message}
+                        </div>
+                        {insight.type === 'frequency' && (
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                            Strategy: {insight.player} likely using {insight.card} as "blocker" in suggestions
+                          </div>
+                        )}
+                        {(insight.type === 'constraint_resolution' || insight.type === 'cascading_deduction') && (
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                            Deduced from constraint propagation
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
               {/* Log Move */}
               <div style={styles.card}>
                 <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem' }}>Log Move</h3>
@@ -1022,9 +1309,15 @@ export default function BoardBrain() {
               setMyCards([]);
               setRemainderCards([]);
               setCurrentTurn(1);
+              setCurrentPlayerIndex(0);
               setMoves([]);
               setKnowledgeMatrix({});
               setProbabilities({});
+              setPreviousProbabilities({});
+              setConstraints([]);
+              setSuggestionFrequency({});
+              setPlayerLocations({});
+              setRecentInsights([]);
             }}
             style={styles.button}
           >

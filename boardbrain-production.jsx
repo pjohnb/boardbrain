@@ -625,10 +625,9 @@ export default function BoardBrain() {
                   Selected: {myCards.length}/{cardsPerPlayer}
                 </p>
               </div>
-            )}
 
             {/* Public/Remainder Cards */}
-            {numPlayers && myCharacter && myCards.length === cardsPerPlayer && remainderCount > 0 && (
+            {myCards.length === cardsPerPlayer && remainderCount > 0 && (
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={styles.label}>
                   Public/Remainder Cards (Select {remainderCount})

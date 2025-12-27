@@ -19,10 +19,12 @@ const ALL_CARDS = [...CLUE_DATA.suspects, ...CLUE_DATA.weapons, ...CLUE_DATA.roo
 
 export default function BoardBrain() {
   // App state
-  const [gamePhase, setGamePhase] = useState('setup'); // 'setup', 'playing', 'gameOver'
+  const [gamePhase, setGamePhase] = useState('setup'); // 'setup', 'playerSetup', 'playing', 'gameOver'
   
   // Setup state
   const [numPlayers, setNumPlayers] = useState(null);
+  const [players, setPlayers] = useState([]); // Array of {name: string, character: string}
+  const [myPlayerIndex, setMyPlayerIndex] = useState(null); // Which player am I?
   const [myCharacter, setMyCharacter] = useState('');
   const [myCards, setMyCards] = useState([]);
   const [remainderCards, setRemainderCards] = useState([]);
@@ -61,23 +63,22 @@ export default function BoardBrain() {
 
   const initializeKnowledgeMatrix = () => {
     const matrix = {};
-    const playerNames = Array.from({ length: numPlayers }, (_, i) => `Player ${i + 1}`);
     
     ALL_CARDS.forEach(card => {
       matrix[card] = {
         solution: '?',
-        ...Object.fromEntries(playerNames.map(p => [p, '?']))
+        ...Object.fromEntries(players.map(p => [p.name, '?']))
       };
       
       // Mark my cards
       if (myCards.includes(card)) {
-        matrix[card][myCharacter] = 'HAS';
+        matrix[card][players[myPlayerIndex].name] = 'HAS';
         matrix[card].solution = 'NO';
       }
       
       // Mark remainder cards
       if (remainderCards.includes(card)) {
-        playerNames.forEach(p => matrix[card][p] = 'NO');
+        players.forEach(p => matrix[card][p.name] = 'NO');
         matrix[card].solution = 'NO';
       }
     });
@@ -119,22 +120,23 @@ export default function BoardBrain() {
     
     // Process responses
     const newMatrix = { ...knowledgeMatrix };
-    const playerNames = Array.from({ length: numPlayers }, (_, i) => `Player ${i + 1}`);
     
-    // Start with player after suggester
-    const suggesterIndex = parseInt(suggester.split(' ')[1]) - 1;
+    // Find suggester index
+    const suggesterIndex = players.findIndex(p => p.name === suggester);
+    
+    // Create response order (players clockwise from suggester)
     const responseOrder = [
-      ...playerNames.slice(suggesterIndex + 1),
-      ...playerNames.slice(0, suggesterIndex)
+      ...players.slice(suggesterIndex + 1),
+      ...players.slice(0, suggesterIndex)
     ];
     
     responseOrder.forEach(player => {
-      const response = responses[player];
+      const response = responses[player.name];
       
       if (response === 'passed') {
         // Player doesn't have any of the three cards
         [suspect, weapon, room].forEach(card => {
-          newMatrix[card][player] = 'NO';
+          newMatrix[card][player.name] = 'NO';
         });
       } else if (response === 'showed') {
         // Player showed a card (we know they have at least one)
@@ -163,6 +165,7 @@ export default function BoardBrain() {
       room: '',
       responses: {}
     });
+  };
   };
 
   const logCardReveal = () => {
@@ -295,7 +298,7 @@ export default function BoardBrain() {
   };
 
   // ============================================================================
-  // SETUP SCREEN
+  // SETUP SCREEN - Number of Players
   // ============================================================================
   if (gamePhase === 'setup') {
     return (
@@ -307,7 +310,7 @@ export default function BoardBrain() {
           </div>
 
           <div style={styles.card}>
-            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Clue</h2>
+            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Step 1</h2>
             
             {/* Number of Players */}
             <div style={{ marginBottom: '1.5rem' }}>
@@ -315,7 +318,15 @@ export default function BoardBrain() {
               <select
                 style={styles.select}
                 value={numPlayers || ''}
-                onChange={(e) => setNumPlayers(parseInt(e.target.value))}
+                onChange={(e) => {
+                  const num = parseInt(e.target.value);
+                  setNumPlayers(num);
+                  // Initialize players array
+                  setPlayers(Array.from({ length: num }, (_, i) => ({
+                    name: `Player ${i + 1}`,
+                    character: ''
+                  })));
+                }}
               >
                 <option value="">Select number of players</option>
                 <option value="3">3 Players</option>
@@ -325,29 +336,170 @@ export default function BoardBrain() {
               </select>
             </div>
 
-            {/* My Character */}
-            {numPlayers && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={styles.label}>Your Character</label>
-                <select
-                  style={styles.select}
-                  value={myCharacter}
-                  onChange={(e) => setMyCharacter(e.target.value)}
-                >
-                  <option value="">Select your character</option>
-                  {CLUE_DATA.suspects.map(suspect => (
-                    <option key={suspect} value={suspect}>{suspect}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            {/* Continue Button */}
+            <button
+              onClick={() => setGamePhase('playerSetup')}
+              disabled={!numPlayers}
+              style={{
+                ...styles.button,
+                ...(!numPlayers && styles.buttonDisabled)
+              }}
+            >
+              Next: Player Setup →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
+  // ============================================================================
+  // PLAYER SETUP SCREEN
+  // ============================================================================
+  if (gamePhase === 'playerSetup') {
+    const usedCharacters = players.map(p => p.character).filter(c => c);
+    const availableCharacters = CLUE_DATA.suspects.filter(c => !usedCharacters.includes(c));
+    const allPlayersNamed = players.every(p => p.name.trim() !== '');
+    const allCharactersAssigned = players.every(p => p.character !== '');
+    
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '60rem', margin: '0 auto' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>More Brain. Better Game.</p>
+          </div>
+
+          <div style={styles.card}>
+            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Step 2: Players</h2>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+              Enter each player's name and assign their character
+            </p>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              {players.map((player, idx) => (
+                <div key={idx} style={{ 
+                  marginBottom: '1.5rem',
+                  padding: '1rem',
+                  backgroundColor: '#0f172a',
+                  borderRadius: '0.375rem',
+                  border: myPlayerIndex === idx ? '2px solid #3b82f6' : '1px solid #334155'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                    <input
+                      type="radio"
+                      name="myPlayer"
+                      checked={myPlayerIndex === idx}
+                      onChange={() => setMyPlayerIndex(idx)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      {myPlayerIndex === idx ? '← This is you' : 'Click to mark as you'}
+                    </span>
+                  </div>
+                  
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label style={styles.label}>Player Name</label>
+                    <input
+                      type="text"
+                      style={{
+                        ...styles.select,
+                        fontSize: '1rem'
+                      }}
+                      value={player.name}
+                      onChange={(e) => {
+                        const newPlayers = [...players];
+                        newPlayers[idx].name = e.target.value;
+                        setPlayers(newPlayers);
+                      }}
+                      placeholder={`Enter name for Player ${idx + 1}`}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label style={styles.label}>Character</label>
+                    <select
+                      style={styles.select}
+                      value={player.character}
+                      onChange={(e) => {
+                        const newPlayers = [...players];
+                        newPlayers[idx].character = e.target.value;
+                        setPlayers(newPlayers);
+                      }}
+                    >
+                      <option value="">Select character</option>
+                      {player.character && (
+                        <option value={player.character}>{player.character}</option>
+                      )}
+                      {availableCharacters.map(char => (
+                        <option key={char} value={char}>{char}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button
+                onClick={() => {
+                  setGamePhase('setup');
+                  setPlayers([]);
+                  setMyPlayerIndex(null);
+                }}
+                style={{
+                  ...styles.button,
+                  flex: 1,
+                  background: 'transparent',
+                  border: '1px solid #475569'
+                }}
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => {
+                  setMyCharacter(players[myPlayerIndex].character);
+                  setGamePhase('cardSetup');
+                }}
+                disabled={!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null}
+                style={{
+                  ...styles.button,
+                  flex: 2,
+                  ...(!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null ? styles.buttonDisabled : {})
+                }}
+              >
+                Next: Card Setup →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // CARD SETUP SCREEN
+  // ============================================================================
+  if (gamePhase === 'cardSetup') {
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '60rem', margin: '0 auto' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>More Brain. Better Game.</p>
+          </div>
+
+          <div style={styles.card}>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Game Setup - Step 3: Your Cards</h2>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+              Playing as: <strong style={{ color: '#60a5fa' }}>{players[myPlayerIndex]?.name}</strong> ({myCharacter})
+            </p>
+            
             {/* My Cards */}
-            {numPlayers && myCharacter && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={styles.label}>
-                  Your Cards (Select {cardsPerPlayer})
-                </label>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={styles.label}>
+                Your Cards (Select {cardsPerPlayer})
+              </label>
                 
                 {/* SUSPECTS */}
                 <div style={{ marginBottom: '1rem' }}>
@@ -522,25 +674,35 @@ export default function BoardBrain() {
               </div>
             )}
 
-            {/* Start Button */}
-            <button
-              onClick={startPlaying}
-              disabled={
-                !numPlayers ||
-                !myCharacter ||
-                myCards.length !== cardsPerPlayer ||
-                (remainderCount > 0 && remainderCards.length !== remainderCount)
-              }
-              style={{
-                ...styles.button,
-                ...((!numPlayers ||
-                    !myCharacter ||
-                    myCards.length !== cardsPerPlayer ||
-                    (remainderCount > 0 && remainderCards.length !== remainderCount)) && styles.buttonDisabled)
-              }}
-            >
-              Start Playing →
-            </button>
+            {/* Start/Back Buttons */}
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button
+                onClick={() => setGamePhase('playerSetup')}
+                style={{
+                  ...styles.button,
+                  flex: 1,
+                  background: 'transparent',
+                  border: '1px solid #475569'
+                }}
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => setGamePhase('playing')}
+                disabled={
+                  myCards.length !== cardsPerPlayer ||
+                  (remainderCount > 0 && remainderCards.length !== remainderCount)
+                }
+                style={{
+                  ...styles.button,
+                  flex: 2,
+                  ...((myCards.length !== cardsPerPlayer ||
+                      (remainderCount > 0 && remainderCards.length !== remainderCount)) && styles.buttonDisabled)
+                }}
+              >
+                Start Playing →
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -551,15 +713,13 @@ export default function BoardBrain() {
   // PLAYING SCREEN
   // ============================================================================
   if (gamePhase === 'playing') {
-    const playerNames = Array.from({ length: numPlayers }, (_, i) => `Player ${i + 1}`);
-    
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: '90rem', margin: '0 auto' }}>
           <div style={{ ...styles.header, marginBottom: '1.5rem' }}>
             <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-              Turn {currentTurn} • Playing as {myCharacter}
+              Turn {currentTurn} • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
             </p>
           </div>
 
@@ -572,8 +732,10 @@ export default function BoardBrain() {
                   <thead>
                     <tr>
                       <th style={{ ...styles.th, textAlign: 'left' }}>Card</th>
-                      {playerNames.map(p => (
-                        <th key={p} style={styles.th}>{p.split(' ')[1]}</th>
+                      {players.map(p => (
+                        <th key={p.name} style={styles.th} title={`${p.name} (${p.character})`}>
+                          {p.name.split(' ')[0]}
+                        </th>
                       ))}
                       <th style={styles.th}>Sol</th>
                       <th style={styles.th}>%</th>
@@ -590,14 +752,14 @@ export default function BoardBrain() {
                         {CLUE_DATA[category].map(card => (
                           <tr key={card}>
                             <td style={{ ...styles.td, textAlign: 'left', color: '#e2e8f0' }}>{card}</td>
-                            {playerNames.map(p => (
-                              <td key={p} style={styles.td}>
+                            {players.map(p => (
+                              <td key={p.name} style={styles.td}>
                                 <span style={{
-                                  color: knowledgeMatrix[card]?.[p] === 'HAS' ? '#4ade80' :
-                                         knowledgeMatrix[card]?.[p] === 'NO' ? '#f87171' : '#64748b'
+                                  color: knowledgeMatrix[card]?.[p.name] === 'HAS' ? '#4ade80' :
+                                         knowledgeMatrix[card]?.[p.name] === 'NO' ? '#f87171' : '#64748b'
                                 }}>
-                                  {knowledgeMatrix[card]?.[p] === 'HAS' ? '✓' :
-                                   knowledgeMatrix[card]?.[p] === 'NO' ? '✗' : '?'}
+                                  {knowledgeMatrix[card]?.[p.name] === 'HAS' ? '✓' :
+                                   knowledgeMatrix[card]?.[p.name] === 'NO' ? '✗' : '?'}
                                 </span>
                               </td>
                             ))}
@@ -636,8 +798,8 @@ export default function BoardBrain() {
                       onChange={(e) => setMoveInput({...moveInput, suggester: e.target.value})}
                     >
                       <option value="">Select player</option>
-                      {playerNames.map(p => (
-                        <option key={p} value={p}>{p}</option>
+                      {players.map(p => (
+                        <option key={p.name} value={p.name}>{p.name} ({p.character})</option>
                       ))}
                     </select>
                   </div>
@@ -687,15 +849,15 @@ export default function BoardBrain() {
                   {moveInput.suggester && (
                     <div>
                       <label style={styles.label}>Player Responses</label>
-                      {playerNames.filter(p => p !== moveInput.suggester).map(p => (
-                        <div key={p} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>{p}</span>
+                      {players.filter(p => p.name !== moveInput.suggester).map(p => (
+                        <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>{p.name}</span>
                           <select
                             style={{ ...styles.select, width: 'auto', fontSize: '0.75rem', padding: '0.25rem' }}
-                            value={moveInput.responses[p] || ''}
+                            value={moveInput.responses[p.name] || ''}
                             onChange={(e) => setMoveInput({
                               ...moveInput,
-                              responses: {...moveInput.responses, [p]: e.target.value}
+                              responses: {...moveInput.responses, [p.name]: e.target.value}
                             })}
                           >
                             <option value="">Select</option>
@@ -762,8 +924,8 @@ export default function BoardBrain() {
                       onChange={(e) => setRevealInput({...revealInput, player: e.target.value})}
                     >
                       <option value="">Select player</option>
-                      {playerNames.map(p => (
-                        <option key={p} value={p}>{p}</option>
+                      {players.map(p => (
+                        <option key={p.name} value={p.name}>{p.name} ({p.character})</option>
                       ))}
                     </select>
                   </div>
@@ -856,6 +1018,8 @@ export default function BoardBrain() {
             onClick={() => {
               setGamePhase('setup');
               setNumPlayers(null);
+              setPlayers([]);
+              setMyPlayerIndex(null);
               setMyCharacter('');
               setMyCards([]);
               setRemainderCards([]);

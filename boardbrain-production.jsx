@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input, Label, Textarea, Alert, AlertDescription, Checkbox } from './ui-components';
 
 /**
  * BoardBrain™ - More Brain. Better Game.
  * © 2024 Xformative AI LLC. All Rights Reserved.
- * 
- * PERFORMANCE FIX: Added useMemo to prevent expensive calculations on every keystroke
  */
 
 // ============================================================================
@@ -203,6 +201,12 @@ export default function BoardBrain() {
     responses: []
   });
   
+  // Card reveal event input
+  const [revealForm, setRevealForm] = useState({
+    card: '',
+    player: ''
+  });
+  
   // AI panel
   const [showAI, setShowAI] = useState(false);
   
@@ -306,41 +310,25 @@ export default function BoardBrain() {
     setConstraints([...constraints, ...newConstraints]);
   }, [moves, cspSolver]);
   
-  // ============================================================================
-  // PERFORMANCE FIX: Memoize expensive calculations
-  // These only recalculate when cspSolver or moves change, NOT on every keystroke
-  // ============================================================================
+  // Calculate probabilities using CSP solver
+  const probabilities = cspSolver ? cspSolver.calculateProbabilities() : {
+    suspects: {},
+    weapons: {},
+    rooms: {},
+    totalCombinations: 324 // Initial total
+  };
   
-  const probabilities = useMemo(() => {
-    if (!cspSolver) {
-      return {
-        suspects: {},
-        weapons: {},
-        rooms: {},
-        totalCombinations: 324 // Initial total
-      };
-    }
-    return cspSolver.calculateProbabilities();
-  }, [cspSolver, moves.length]); // Only recalculate when solver exists or moves change
+  // Get most likely solution from CSP solver
+  const solution = cspSolver ? cspSolver.getMostLikelySolution() : {
+    suspect: { card: null, prob: 0 },
+    weapon: { card: null, prob: 0 },
+    room: { card: null, prob: 0 },
+    totalCombinations: 324
+  };
   
-  const solution = useMemo(() => {
-    if (!cspSolver) {
-      return {
-        suspect: { card: null, prob: 0 },
-        weapon: { card: null, prob: 0 },
-        room: { card: null, prob: 0 },
-        totalCombinations: 324
-      };
-    }
-    return cspSolver.getMostLikelySolution();
-  }, [cspSolver, moves.length]); // Only recalculate when solver exists or moves change
-  
-  const overallConfidence = useMemo(() => {
-    if (solution.suspect.prob && solution.weapon.prob && solution.room.prob) {
-      return Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3);
-    }
-    return 0;
-  }, [solution]);
+  const overallConfidence = solution.suspect.prob && solution.weapon.prob && solution.room.prob
+    ? Math.round((solution.suspect.prob + solution.weapon.prob + solution.room.prob) / 3)
+    : 0;
   
   // Handle move submission
   const handleAddMove = (e) => {
@@ -372,6 +360,40 @@ export default function BoardBrain() {
     
     // Advance turn
     setCurrentTurn((currentTurn + 1) % numPlayers);
+  };
+  
+  // Handle card reveal event (special cards/intrigue cards)
+  const handleCardReveal = (e) => {
+    e.preventDefault();
+    
+    const revealEvent = {
+      turn: moves.length + 1,
+      type: 'REVEAL',
+      card: revealForm.card,
+      player: revealForm.player,
+      timestamp: new Date().toISOString()
+    };
+    
+    setMoves([...moves, revealEvent]);
+    
+    // Update knowledge matrix immediately
+    const newMatrix = { ...knowledgeMatrix };
+    if (newMatrix[revealForm.card]) {
+      newMatrix[revealForm.card][revealForm.player] = 'HAS';
+      newMatrix[revealForm.card].solution = 'NO';
+    }
+    setKnowledgeMatrix(newMatrix);
+    
+    // Update CSP solver - eliminate card from vault
+    if (cspSolver) {
+      cspSolver.eliminateCard(revealForm.card);
+    }
+    
+    // Reset form
+    setRevealForm({
+      card: '',
+      player: ''
+    });
   };
   
   // WELCOME SCREEN
@@ -521,8 +543,8 @@ export default function BoardBrain() {
                           type="text"
                           placeholder={`Player ${idx + 2} name (e.g., Lisa)`}
                           className="flex-1 bg-slate-900 border-slate-700 text-white p-2 rounded border text-sm"
-                          defaultValue={player.startsWith('Player') ? '' : player}
-                          onBlur={(e) => {
+                          value={player.startsWith('Player') ? '' : player}
+                          onChange={(e) => {
                             const newNames = [...playerNames];
                             newNames[idx + 1] = e.target.value || `Player ${idx + 2}`;
                             setPlayerNames(newNames);
@@ -560,15 +582,18 @@ export default function BoardBrain() {
                           <label key={card} className="flex items-center space-x-2 text-sm">
                             <Checkbox
                               checked={myCards.includes(card)}
+                              disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
                               onCheckedChange={(checked) => {
-                                if (checked && myCards.length < cardsPerPlayer) {
+                                if (checked) {
                                   setMyCards([...myCards, card]);
-                                } else if (!checked) {
+                                } else {
                                   setMyCards(myCards.filter(c => c !== card));
                                 }
                               }}
                             />
-                            <span>{card}</span>
+                            <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-600' : ''}>
+                              {card}
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -581,15 +606,18 @@ export default function BoardBrain() {
                           <label key={card} className="flex items-center space-x-2 text-sm">
                             <Checkbox
                               checked={myCards.includes(card)}
+                              disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
                               onCheckedChange={(checked) => {
-                                if (checked && myCards.length < cardsPerPlayer) {
+                                if (checked) {
                                   setMyCards([...myCards, card]);
-                                } else if (!checked) {
+                                } else {
                                   setMyCards(myCards.filter(c => c !== card));
                                 }
                               }}
                             />
-                            <span>{card}</span>
+                            <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-600' : ''}>
+                              {card}
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -602,15 +630,18 @@ export default function BoardBrain() {
                           <label key={card} className="flex items-center space-x-2 text-sm">
                             <Checkbox
                               checked={myCards.includes(card)}
+                              disabled={!myCards.includes(card) && myCards.length >= cardsPerPlayer}
                               onCheckedChange={(checked) => {
-                                if (checked && myCards.length < cardsPerPlayer) {
+                                if (checked) {
                                   setMyCards([...myCards, card]);
-                                } else if (!checked) {
+                                } else {
                                   setMyCards(myCards.filter(c => c !== card));
                                 }
                               }}
                             />
-                            <span>{card}</span>
+                            <span className={!myCards.includes(card) && myCards.length >= cardsPerPlayer ? 'text-slate-600' : ''}>
+                              {card}
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -634,15 +665,18 @@ export default function BoardBrain() {
                         <label key={card} className="flex items-center space-x-2 text-sm">
                           <Checkbox
                             checked={remainderCards.includes(card)}
+                            disabled={!remainderCards.includes(card) && remainderCards.length >= remainderCount}
                             onCheckedChange={(checked) => {
-                              if (checked && remainderCards.length < remainderCount) {
+                              if (checked) {
                                 setRemainderCards([...remainderCards, card]);
-                              } else if (!checked) {
+                              } else {
                                 setRemainderCards(remainderCards.filter(c => c !== card));
                               }
                             }}
                           />
-                          <span>{card}</span>
+                          <span className={!remainderCards.includes(card) && remainderCards.length >= remainderCount ? 'text-slate-600' : ''}>
+                            {card}
+                          </span>
                         </label>
                       ))}
                     </div>
@@ -781,100 +815,243 @@ export default function BoardBrain() {
 
                     <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Suggestion:</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <select
-                            className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
-                            value={moveForm.suspect}
-                            onChange={(e) => setMoveForm({...moveForm, suspect: e.target.value})}
-                          >
-                            <option value="">Suspect</option>
-                            {CLUE_DATA.suspects.map(s => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
+                      {!moveForm.player || !moveForm.movedTo ? (
+                        <p className="text-xs text-slate-500 italic py-2">Complete "Who's turn" and "Moved to" first</p>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <select
+                              className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
+                              value={moveForm.suspect}
+                              onChange={(e) => setMoveForm({...moveForm, suspect: e.target.value})}
+                            >
+                              <option value="">Suspect</option>
+                              {CLUE_DATA.suspects.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <select
+                              className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
+                              value={moveForm.weapon}
+                              onChange={(e) => setMoveForm({...moveForm, weapon: e.target.value})}
+                            >
+                              <option value="">Weapon</option>
+                              {CLUE_DATA.weapons.map(w => (
+                                <option key={w} value={w}>{w}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <Input
+                              className="bg-slate-800 border-slate-600 text-white h-9 text-xs"
+                              value={moveForm.room || moveForm.movedTo}
+                              readOnly
+                              placeholder="Room"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <select
-                            className="w-full bg-slate-800 border-slate-600 text-white h-9 p-1 rounded border text-xs"
-                            value={moveForm.weapon}
-                            onChange={(e) => setMoveForm({...moveForm, weapon: e.target.value})}
-                          >
-                            <option value="">Weapon</option>
-                            {CLUE_DATA.weapons.map(w => (
-                              <option key={w} value={w}>{w}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <Input
-                            className="bg-slate-800 border-slate-600 text-white h-9 text-xs"
-                            value={moveForm.room || moveForm.movedTo}
-                            readOnly
-                            placeholder="Room"
-                          />
-                        </div>
-                      </div>
+                      )}
                     </div>
 
                     <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                       <p className="text-sm text-slate-400 mb-2">Responses:</p>
-                      {playerNames.filter(p => p !== moveForm.player).map(player => {
-                        const characterName = playerCharacters[player] || '';
-                        const shortCharacter = characterName ? characterName.split(' ').pop() : '';
-                        const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
-                        
-                        return (
-                          <div key={player} className="flex items-center gap-2 mb-2">
-                            <span className="text-sm text-white w-32">{displayLabel}:</span>
-                            <select
-                            className="flex-1 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
-                            value={moveForm.responses.find(r => r.player === player)?.action || ''}
-                            onChange={(e) => {
-                              const action = e.target.value;
-                              const newResponses = moveForm.responses.filter(r => r.player !== player);
-                              if (action) {
-                                newResponses.push({ player, action, cardShown: null });
-                              }
-                              setMoveForm({...moveForm, responses: newResponses});
-                            }}
-                          >
-                            <option value="">Response</option>
-                            <option value="PASS">Passed</option>
-                            <option value="SHOW">Showed Card</option>
-                          </select>
-                          
-                          {moveForm.responses.find(r => r.player === player)?.action === 'SHOW' && player === 'You' && (
-                            <select
-                              className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
-                              value={moveForm.responses.find(r => r.player === player)?.cardShown || ''}
-                              onChange={(e) => {
-                                const card = e.target.value;
-                                const newResponses = moveForm.responses.map(r => 
-                                  r.player === player ? {...r, cardShown: card} : r
-                                );
-                                setMoveForm({...moveForm, responses: newResponses});
-                              }}
-                            >
-                              <option value="">Which?</option>
-                              {[moveForm.suspect, moveForm.weapon, moveForm.room]
-                                .filter(c => myCards.includes(c))
-                                .map(card => (
-                                  <option key={card} value={card}>{card}</option>
-                                ))
-                              }
-                            </select>
-                          )}
-                        </div>
-                      )})}
+                      {!moveForm.suspect || !moveForm.weapon ? (
+                        <p className="text-xs text-slate-500 italic py-2">Complete suggestion first</p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-slate-500 mb-2">Players respond in turn order (starting with next player)</p>
+                          {(() => {
+                            // Get players who should respond (exclude current player)
+                            const currentPlayerIdx = playerNames.indexOf(moveForm.player);
+                            const respondingPlayers = [];
+                            
+                            // Start with next player after current, go around the table
+                            for (let i = 1; i < numPlayers; i++) {
+                              const playerIdx = (currentPlayerIdx + i) % numPlayers;
+                              respondingPlayers.push(playerNames[playerIdx]);
+                            }
+                            
+                            return respondingPlayers.map((player, playerIdx) => {
+                            return respondingPlayers.map((player, playerIdx) => {
+                              const characterName = playerCharacters[player] || '';
+                              const shortCharacter = characterName ? characterName.split(' ').pop() : '';
+                              const displayLabel = shortCharacter ? `${player}: ${shortCharacter}` : player;
+                              
+                              // Check if previous players have all responded
+                              const previousPlayers = respondingPlayers.slice(0, playerIdx);
+                              const allPreviousResponded = previousPlayers.every(prevPlayer => 
+                                moveForm.responses.some(r => r.player === prevPlayer)
+                              );
+                              
+                              // Check if this player has responded
+                              const thisPlayerResponse = moveForm.responses.find(r => r.player === player);
+                              
+                              // Disable if previous players haven't all responded
+                              const isDisabled = !allPreviousResponded;
+                              
+                              // Check if player has any of the suggested cards (for "You" only)
+                              const suggestedCards = [moveForm.suspect, moveForm.weapon, moveForm.room].filter(Boolean);
+                              const playerHasCard = player === 'You' && suggestedCards.some(card => myCards.includes(card));
+                              
+                              // Check if someone already showed a card
+                              const someoneShowed = moveForm.responses.some(r => r.action === 'SHOW');
+                              
+                              // Can't pass if you have a card and no one showed yet
+                              const mustShow = playerHasCard && !someoneShowed;
+                              
+                              return (
+                                <div key={player} className="flex items-center gap-2 mb-2">
+                                  <span className={`text-sm w-32 ${isDisabled ? 'text-slate-600' : 'text-white'}`}>
+                                    {displayLabel}:
+                                  </span>
+                                  <select
+                                    className={`flex-1 h-8 p-1 rounded border text-xs ${
+                                      isDisabled 
+                                        ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed' 
+                                        : 'bg-slate-800 border-slate-600 text-white'
+                                    }`}
+                                    value={thisPlayerResponse?.action || ''}
+                                    disabled={isDisabled}
+                                    onChange={(e) => {
+                                      const action = e.target.value;
+                                      const newResponses = moveForm.responses.filter(r => r.player !== player);
+                                      if (action) {
+                                        newResponses.push({ player, action, cardShown: null });
+                                      }
+                                      setMoveForm({...moveForm, responses: newResponses});
+                                    }}
+                                  >
+                                    <option value="">{isDisabled ? 'Waiting...' : 'Response'}</option>
+                                    {!mustShow && <option value="PASS">Passed</option>}
+                                    <option value="SHOW">Showed Card</option>
+                                  </select>
+                                  
+                                  {mustShow && !thisPlayerResponse && (
+                                    <span className="text-xs text-yellow-400">Must show!</span>
+                                  )}
+                                  
+                                  {thisPlayerResponse?.action === 'SHOW' && player === 'You' && (
+                                    <select
+                                      className="w-32 bg-slate-800 border-slate-600 text-white h-8 p-1 rounded border text-xs"
+                                      value={thisPlayerResponse?.cardShown || ''}
+                                      onChange={(e) => {
+                                        const card = e.target.value;
+                                        const newResponses = moveForm.responses.map(r => 
+                                          r.player === player ? {...r, cardShown: card} : r
+                                        );
+                                        setMoveForm({...moveForm, responses: newResponses});
+                                      }}
+                                    >
+                                      <option value="">Which?</option>
+                                      {suggestedCards
+                                        .filter(c => myCards.includes(c))
+                                        .map(card => (
+                                          <option key={card} value={card}>{card}</option>
+                                        ))
+                                      }
+                                    </select>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </>
+                      )}
                     </div>
 
+                    <div className="flex gap-2">
+                      <Button 
+                        type="button"
+                        className="flex-1 bg-red-600 hover:bg-red-700 h-9"
+                        onClick={() => {
+                          if (confirm('Are you sure you want to end the game?')) {
+                            // Reset to welcome screen
+                            setAppPhase('welcome');
+                            setMoves([]);
+                            setKnowledgeMatrix({});
+                            setConstraints([]);
+                            setCspSolver(null);
+                          }
+                        }}
+                      >
+                        End Game
+                      </Button>
+                      <Button 
+                        type="submit"
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 h-9"
+                        disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon || !moveForm.room}
+                      >
+                        Log This Move
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+
+              {/* Card Reveal Event */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    🎴 Card Reveal Event
+                  </CardTitle>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Special card forces a player to reveal a card publicly
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleCardReveal} className="space-y-3">
+                    <div>
+                      <Label className="text-white text-sm">Card Revealed</Label>
+                      <select
+                        className="w-full bg-slate-900 border-slate-700 text-white h-9 p-1 rounded border"
+                        value={revealForm.card}
+                        onChange={(e) => setRevealForm({...revealForm, card: e.target.value})}
+                      >
+                        <option value="">Select card...</option>
+                        <optgroup label="SUSPECTS">
+                          {CLUE_DATA.suspects.map(card => (
+                            <option key={card} value={card}>{card}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="WEAPONS">
+                          {CLUE_DATA.weapons.map(card => (
+                            <option key={card} value={card}>{card}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="ROOMS">
+                          {CLUE_DATA.rooms.map(card => (
+                            <option key={card} value={card}>{card}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <Label className="text-white text-sm">Player Has It</Label>
+                      <select
+                        className="w-full bg-slate-900 border-slate-700 text-white h-9 p-1 rounded border"
+                        value={revealForm.player}
+                        onChange={(e) => setRevealForm({...revealForm, player: e.target.value})}
+                      >
+                        <option value="">Select player...</option>
+                        {playerNames.map(name => {
+                          const characterName = playerCharacters[name] || '';
+                          const displayName = characterName ? `${name} (${characterName.split(' ').pop()})` : name;
+                          return (
+                            <option key={name} value={name}>{displayName}</option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    
                     <Button 
                       type="submit"
-                      className="w-full bg-blue-600 hover:bg-blue-700 h-9"
-                      disabled={!moveForm.player || !moveForm.suspect || !moveForm.weapon}
+                      className="w-full bg-purple-600 hover:bg-purple-700 h-9"
+                      disabled={!revealForm.card || !revealForm.player}
                     >
-                      Log This Move
+                      Log Card Reveal
                     </Button>
                   </form>
                 </CardContent>
@@ -891,19 +1068,37 @@ export default function BoardBrain() {
                       <p className="text-sm text-slate-400 text-center py-4">No moves yet</p>
                     ) : (
                       moves.slice().reverse().map((move, idx) => (
-                        <div key={moves.length - idx} className="p-2 bg-slate-900 rounded text-sm">
-                          <p className="font-semibold text-white">Turn {move.turn}: {move.player}</p>
-                          <p className="text-slate-400 text-xs">
-                            Suggested: {move.suspect}, {move.weapon}, {move.room}
-                          </p>
-                          <div className="text-xs text-slate-500 mt-1">
-                            {move.responses.map(r => (
-                              <span key={r.player} className="mr-2">
-                                {r.player}: {r.action === 'PASS' ? 'Pass' : 'Show'}
-                                {r.cardShown && ` (${r.cardShown})`}
-                              </span>
-                            ))}
-                          </div>
+                        <div key={moves.length - idx} className={`p-2 rounded text-sm ${
+                          move.type === 'REVEAL' ? 'bg-purple-900/30 border border-purple-700/50' : 'bg-slate-900'
+                        }`}>
+                          {move.type === 'REVEAL' ? (
+                            // Card Reveal Event
+                            <>
+                              <p className="font-semibold text-purple-300">Turn {move.turn}: Card Revealed 🎴</p>
+                              <p className="text-purple-200 text-xs">
+                                {move.player} has: <span className="font-semibold">{move.card}</span>
+                              </p>
+                              <p className="text-purple-400/60 text-xs mt-1">
+                                (Special card event)
+                              </p>
+                            </>
+                          ) : (
+                            // Regular Suggestion
+                            <>
+                              <p className="font-semibold text-white">Turn {move.turn}: {move.player}</p>
+                              <p className="text-slate-400 text-xs">
+                                Suggested: {move.suspect}, {move.weapon}, {move.room}
+                              </p>
+                              <div className="text-xs text-slate-500 mt-1">
+                                {move.responses.map(r => (
+                                  <span key={r.player} className="mr-2">
+                                    {r.player}: {r.action === 'PASS' ? 'Pass' : 'Show'}
+                                    {r.cardShown && ` (${r.cardShown})`}
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          )}
                         </div>
                       ))
                     )}
@@ -917,62 +1112,78 @@ export default function BoardBrain() {
               {/* Solution Prediction */}
               <Card className="bg-slate-800 border-slate-700">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg text-white">🎯 Most Likely Solution</CardTitle>
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    🧠 AI Analysis
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">Suspect</p>
-                      <p className="text-sm text-white font-semibold">{solution.suspect.card || '?'}</p>
-                      <p className={`text-lg font-bold ${solution.suspect.prob >= 80 ? 'text-green-400' : solution.suspect.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                        {solution.suspect.prob}%
-                      </p>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-slate-400">Overall Confidence</span>
+                        <span className="text-2xl font-bold text-white">{overallConfidence}%</span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{width: `${overallConfidence}%`}}
+                        />
+                      </div>
                     </div>
-                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">Weapon</p>
-                      <p className="text-sm text-white font-semibold">{solution.weapon.card || '?'}</p>
-                      <p className={`text-lg font-bold ${solution.weapon.prob >= 80 ? 'text-green-400' : solution.weapon.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                        {solution.weapon.prob}%
-                      </p>
+
+                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+                      <p className="text-sm text-slate-400 mb-2">Most Likely Solution:</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Suspect:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.suspect.card || 'Unknown'} ({solution.suspect.prob}%)
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Weapon:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.weapon.card || 'Unknown'} ({solution.weapon.prob}%)
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white text-sm">Room:</span>
+                          <span className="text-blue-400 font-semibold text-sm">
+                            {solution.room.card || 'Unknown'} ({solution.room.prob}%)
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="bg-slate-900 p-3 rounded-lg text-center border border-slate-700">
-                      <p className="text-xs text-slate-400 mb-1">Room</p>
-                      <p className="text-sm text-white font-semibold">{solution.room.card || '?'}</p>
-                      <p className={`text-lg font-bold ${solution.room.prob >= 80 ? 'text-green-400' : solution.room.prob >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                        {solution.room.prob}%
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-400">Overall Confidence:</span>
-                      <span className={`text-xl font-bold ${overallConfidence >= 80 ? 'text-green-400' : overallConfidence >= 50 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                        {overallConfidence}%
-                      </span>
-                    </div>
-                    <div className="mt-2 bg-slate-800 rounded-full h-3 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 ${
-                          overallConfidence >= 80 ? 'bg-green-500' : 
-                          overallConfidence >= 50 ? 'bg-yellow-500' : 'bg-slate-600'
-                        }`}
-                        style={{ width: `${overallConfidence}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2 text-center">
-                      {overallConfidence >= 85 ? '🎯 Ready to make an accusation!' : 
-                       overallConfidence >= 60 ? '📊 Getting closer...' : 
-                       '🔍 Keep gathering information'}
-                    </p>
+
+                    {overallConfidence >= 85 ? (
+                      <Alert className="bg-green-900 border-green-700">
+                        <AlertDescription className="text-green-200 text-sm">
+                          <strong>HIGH CONFIDENCE!</strong> You should consider making your accusation.
+                        </AlertDescription>
+                      </Alert>
+                    ) : overallConfidence >= 70 ? (
+                      <Alert className="bg-yellow-900 border-yellow-700">
+                        <AlertDescription className="text-yellow-200 text-sm">
+                          <strong>GETTING CLOSE.</strong> Gather a bit more information before accusing.
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <Alert className="bg-slate-900 border-slate-700">
+                        <AlertDescription className="text-slate-400 text-sm">
+                          Keep gathering information. Make strategic suggestions to narrow down possibilities.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Strategy Tips */}
+              {/* Strategic Advice Panel */}
               <Card className="bg-slate-800 border-slate-700">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg text-white">💡 Strategy Tips</CardTitle>
+                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                    💡 Strategic Advice
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
@@ -1050,6 +1261,19 @@ export default function BoardBrain() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs border-collapse">
                       <thead>
+                        {/* Header row with "PLAYERS" label */}
+                        <tr className="border-b border-slate-700">
+                          <th className="text-left py-1 px-2"></th>
+                          <th 
+                            colSpan={numPlayers} 
+                            className="text-center py-1 px-2 text-slate-500 uppercase text-xs font-semibold tracking-wider"
+                          >
+                            Players
+                          </th>
+                          <th className="text-center py-1 px-2"></th>
+                          <th className="text-center py-1 px-2"></th>
+                        </tr>
+                        {/* Column headers */}
                         <tr className="border-b-2 border-slate-600">
                           <th className="text-left py-2 px-2 text-slate-400 font-semibold">Card</th>
                           <th className="text-center py-2 px-2 text-slate-400 font-semibold">

@@ -546,6 +546,11 @@ export default function BoardBrain() {
     const allPlayersNamed = players.every(p => p.name.trim() !== '');
     const allCharactersAssigned = players.every(p => p.character !== '');
     
+    // Auto-set host to last player if not yet set
+    if (myPlayerIndex === null && players.length > 0) {
+      setMyPlayerIndex(players.length - 1);
+    }
+    
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: '60rem', margin: '0 auto' }}>
@@ -555,32 +560,60 @@ export default function BoardBrain() {
           </div>
 
           <div style={styles.card}>
-            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Step 2: Players</h2>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Game Setup - Step 2: Players</h2>
             <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
-              Enter each player's name and assign their character
+              Enter each player's name and assign their character. You (host) are automatically the last player.
             </p>
             
             <div style={{ marginBottom: '1.5rem' }}>
-              {players.map((player, idx) => (
-                <div key={idx} style={{ 
-                  marginBottom: '1.5rem',
-                  padding: '1rem',
-                  backgroundColor: '#0f172a',
-                  borderRadius: '0.375rem',
-                  border: myPlayerIndex === idx ? '2px solid #3b82f6' : '1px solid #334155'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                    <input
-                      type="radio"
-                      name="myPlayer"
-                      checked={myPlayerIndex === idx}
-                      onChange={() => setMyPlayerIndex(idx)}
-                      style={{ cursor: 'pointer' }}
-                    />
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                      {myPlayerIndex === idx ? '← This is you' : 'Click to mark as you'}
-                    </span>
-                  </div>
+              {players.map((player, idx) => {
+                const isLastPlayer = idx === players.length - 1;
+                const isHost = myPlayerIndex === idx;
+                
+                return (
+                  <div key={idx} style={{ 
+                    marginBottom: '1.5rem',
+                    padding: '1rem',
+                    backgroundColor: '#0f172a',
+                    borderRadius: '0.375rem',
+                    border: isHost ? '2px solid #3b82f6' : '1px solid #334155'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ 
+                          fontSize: '1rem', 
+                          fontWeight: 'bold', 
+                          color: isHost ? '#60a5fa' : '#cbd5e1' 
+                        }}>
+                          Player {idx + 1}
+                        </span>
+                        {isLastPlayer && (
+                          <span style={{ 
+                            fontSize: '0.75rem', 
+                            color: '#fbbf24',
+                            backgroundColor: '#1e293b',
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: '0.25rem'
+                          }}>
+                            YOU (Host)
+                          </span>
+                        )}
+                      </div>
+                      {!isLastPlayer && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <input
+                            type="radio"
+                            name="myPlayer"
+                            checked={isHost}
+                            onChange={() => setMyPlayerIndex(idx)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                            {isHost ? '← This is you' : 'Make this you'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   
                   <div style={{ marginBottom: '0.75rem' }}>
                     <label style={styles.label}>Player Name</label>
@@ -621,7 +654,8 @@ export default function BoardBrain() {
                     </select>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
 
             <div style={{ display: 'flex', gap: '1rem' }}>
@@ -939,9 +973,14 @@ export default function BoardBrain() {
                   <thead>
                     <tr>
                       <th style={{ ...styles.th, textAlign: 'left' }}>Card</th>
-                      {players.map(p => (
+                      {players.map((p, idx) => (
                         <th key={p.name} style={styles.th} title={`${p.name} (${p.character})`}>
-                          {p.name.split(' ')[0]}
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.15rem' }}>
+                            P{idx + 1}
+                          </div>
+                          <div>
+                            {p.name.split(' ')[0]}
+                          </div>
                         </th>
                       ))}
                       <th style={styles.th}>Sol</th>
@@ -1134,23 +1173,38 @@ export default function BoardBrain() {
                   {moveInput.suggester && (
                     <div>
                       <label style={styles.label}>Player Responses</label>
-                      {players.filter(p => p.name !== moveInput.suggester).map(p => (
-                        <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>{p.name}</span>
-                          <select
-                            style={{ ...styles.select, width: 'auto', fontSize: '0.75rem', padding: '0.25rem' }}
-                            value={moveInput.responses[p.name] || ''}
-                            onChange={(e) => setMoveInput({
-                              ...moveInput,
-                              responses: {...moveInput.responses, [p.name]: e.target.value}
-                            })}
-                          >
-                            <option value="">Select</option>
-                            <option value="passed">Passed</option>
-                            <option value="showed">Showed Card</option>
-                          </select>
-                        </div>
-                      ))}
+                      {players.filter(p => p.name !== moveInput.suggester).map(p => {
+                        // Check if this player is YOU and if you have any of the suggested cards
+                        const isHost = p.name === players[myPlayerIndex]?.name;
+                        const suggestedCards = [moveInput.suspect, moveInput.weapon, moveInput.room].filter(c => c);
+                        const hostHasCard = isHost && suggestedCards.some(card => myCards.includes(card));
+                        
+                        return (
+                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
+                              {p.name}{isHost ? ' (YOU)' : ''}
+                            </span>
+                            <select
+                              style={{ ...styles.select, width: 'auto', fontSize: '0.75rem', padding: '0.25rem' }}
+                              value={moveInput.responses[p.name] || ''}
+                              onChange={(e) => setMoveInput({
+                                ...moveInput,
+                                responses: {...moveInput.responses, [p.name]: e.target.value}
+                              })}
+                            >
+                              <option value="">Select</option>
+                              {/* Only show "Passed" if host doesn't have the card */}
+                              {!hostHasCard && <option value="passed">Passed</option>}
+                              <option value="showed">Showed Card</option>
+                            </select>
+                            {hostHasCard && (
+                              <span style={{ fontSize: '0.65rem', color: '#fbbf24', marginLeft: '0.5rem' }}>
+                                Must show!
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 

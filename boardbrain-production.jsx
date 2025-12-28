@@ -136,11 +136,32 @@ export default function BoardBrain() {
           c.cards.includes(card) && c.showedBy
         );
         
+        // ENHANCED: Check if any player has this card in multiple constraints
+        let maxConstraintCount = 0;
+        let likelyHolder = null;
+        
+        players.forEach(player => {
+          const playerConstraintsWithCard = relevantConstraints.filter(c => 
+            c.showedBy === player.name
+          );
+          if (playerConstraintsWithCard.length > maxConstraintCount) {
+            maxConstraintCount = playerConstraintsWithCard.length;
+            likelyHolder = player.name;
+          }
+        });
+        
         if (relevantConstraints.length > 0) {
-          // Card was in suggestions where someone showed a card
-          // This slightly reduces probability it's in solution
-          const reductionFactor = 1 - (relevantConstraints.length * 0.05);
-          adjustedProb = baseProb * Math.max(reductionFactor, 0.3);
+          // Base reduction: card in constraints = less likely in solution
+          let reductionFactor = 1 - (relevantConstraints.length * 0.05);
+          
+          // ADDITIONAL: If one player has this card in 3+ constraints, very unlikely in solution
+          if (maxConstraintCount >= 3) {
+            reductionFactor = reductionFactor * 0.3; // Heavy reduction
+          } else if (maxConstraintCount >= 2) {
+            reductionFactor = reductionFactor * 0.6; // Moderate reduction
+          }
+          
+          adjustedProb = baseProb * Math.max(reductionFactor, 0.1);
         }
         
         // FREQUENCY DETECTION: Check if players repeatedly suggest this card
@@ -286,53 +307,236 @@ export default function BoardBrain() {
         });
         constraintCreated = true;
         
-        // CONSTRAINT PROPAGATION: Try to deduce which card was shown
-        // If player is eliminated from 2 of the 3 cards, they MUST have the 3rd
+        // IMMEDIATE RESOLUTION CHECK
+        // If player is already eliminated from 2 of the 3 cards, they MUST have the 3rd
         const possibleCards = suggestedCards.filter(card => 
           newMatrix[card][player.name] !== 'NO'
         );
         
         if (possibleCards.length === 1) {
-          // DEDUCTION! Player must have this specific card
+          // IMMEDIATE DEDUCTION! Player must have this specific card
           const deducedCard = possibleCards[0];
           newMatrix[deducedCard][player.name] = 'HAS';
           newMatrix[deducedCard].solution = 'NO';
           
+          // Also eliminate the other cards from this constraint immediately
+          suggestedCards.forEach(card => {
+            if (card !== deducedCard && newMatrix[card][player.name] !== 'NO') {
+              newMatrix[card][player.name] = 'NO';
+            }
+          });
+          
           // Generate insight
           setRecentInsights(prev => [{
-            type: 'constraint_resolution',
+            type: 'immediate_resolution',
             card: deducedCard,
             player: player.name,
             turn: currentTurn,
-            message: `${player.name} MUST have ${deducedCard} (only option from Turn ${currentTurn} suggestion)`
-          }, ...prev].slice(0, 5));
+            message: `${player.name} MUST have ${deducedCard} (only option from Turn ${currentTurn})`
+          }, ...prev].slice(0, 8));
         }
       }
     });
     
-    // PROPAGATE CONSTRAINTS: Re-check all previous constraints with new knowledge
-    newConstraints.forEach(constraint => {
-      const player = constraint.showedBy;
-      const possibleCards = constraint.cards.filter(card => 
-        newMatrix[card][player] !== 'NO'
-      );
+    // ============================================================================
+    // COMPREHENSIVE CONSTRAINT PROPAGATION ENGINE
+    // ============================================================================
+    const propagatedInsights = [];
+    let changesOccurred = true;
+    let iterationCount = 0;
+    const maxIterations = 10; // Prevent infinite loops
+    
+    // Keep propagating until no more changes (or max iterations)
+    while (changesOccurred && iterationCount < maxIterations) {
+      changesOccurred = false;
+      iterationCount++;
       
-      if (possibleCards.length === 1 && newMatrix[possibleCards[0]][player] !== 'HAS') {
-        // CASCADING DEDUCTION! 
-        const deducedCard = possibleCards[0];
-        newMatrix[deducedCard][player] = 'HAS';
-        newMatrix[deducedCard].solution = 'NO';
+      // ========================================================================
+      // STEP 1: BASIC CONSTRAINT RESOLUTION
+      // Check each constraint - if narrowed to 1 card, resolve it
+      // ========================================================================
+      newConstraints.forEach((constraint, idx) => {
+        const player = constraint.showedBy;
+        const possibleCards = constraint.cards.filter(card => 
+          newMatrix[card][player] !== 'NO'
+        );
         
-        setRecentInsights(prev => [{
-          type: 'cascading_deduction',
-          card: deducedCard,
-          player: player,
-          originalTurn: constraint.turn,
-          currentTurn: currentTurn,
-          message: `${player} MUST have ${deducedCard} (constraint from Turn ${constraint.turn} now resolved)`
-        }, ...prev].slice(0, 5));
-      }
-    });
+        if (possibleCards.length === 1 && newMatrix[possibleCards[0]][player] !== 'HAS') {
+          // RESOLUTION! Player must have this card
+          const deducedCard = possibleCards[0];
+          newMatrix[deducedCard][player] = 'HAS';
+          newMatrix[deducedCard].solution = 'NO';
+          changesOccurred = true;
+          
+          propagatedInsights.push({
+            type: 'constraint_resolution',
+            card: deducedCard,
+            player: player,
+            turn: constraint.turn,
+            message: `${player} MUST have ${deducedCard} (resolved from Turn ${constraint.turn})`
+          });
+          
+          // ====================================================================
+          // BACKWARD ELIMINATION: Eliminate other cards from this constraint
+          // If Bob has Mustard and constraint was {Mustard, Knife, Kitchen}
+          // Then Bob doesn't have Knife or Kitchen
+          // ====================================================================
+          constraint.cards.forEach(card => {
+            if (card !== deducedCard && newMatrix[card][player] !== 'NO') {
+              newMatrix[card][player] = 'NO';
+              changesOccurred = true;
+              
+              propagatedInsights.push({
+                type: 'backward_elimination',
+                card: card,
+                player: player,
+                turn: constraint.turn,
+                message: `${player} doesn't have ${card} (showed ${deducedCard} in Turn ${constraint.turn})`
+              });
+            }
+          });
+        }
+        
+        // Also check if player has been confirmed to have one of the constraint cards elsewhere
+        const confirmedCards = possibleCards.filter(card => 
+          newMatrix[card][player] === 'HAS'
+        );
+        
+        if (confirmedCards.length === 1) {
+          // We know player has this card - eliminate others from constraint
+          const confirmedCard = confirmedCards[0];
+          constraint.cards.forEach(card => {
+            if (card !== confirmedCard && newMatrix[card][player] !== 'NO') {
+              newMatrix[card][player] = 'NO';
+              changesOccurred = true;
+              
+              propagatedInsights.push({
+                type: 'backward_elimination',
+                card: card,
+                player: player,
+                turn: constraint.turn,
+                message: `${player} doesn't have ${card} (has ${confirmedCard} from Turn ${constraint.turn})`
+              });
+            }
+          });
+        }
+      });
+      
+      // ========================================================================
+      // STEP 2: INTERSECTION DETECTION
+      // Find cards that appear in ALL constraints for a player
+      // ========================================================================
+      players.forEach(p => {
+        const playerConstraints = newConstraints.filter(c => c.showedBy === p.name);
+        
+        if (playerConstraints.length >= 2) {
+          // Get possible cards for each constraint
+          const possibleSets = playerConstraints.map(c => 
+            c.cards.filter(card => newMatrix[card][p.name] !== 'NO')
+          );
+          
+          // Find intersection (cards in ALL constraints)
+          const intersection = possibleSets.reduce((acc, set) => 
+            acc.filter(card => set.includes(card))
+          );
+          
+          if (intersection.length === 1 && newMatrix[intersection[0]][p.name] !== 'HAS') {
+            // This player MUST have this card (only one in all constraints)
+            const deducedCard = intersection[0];
+            newMatrix[deducedCard][p.name] = 'HAS';
+            newMatrix[deducedCard].solution = 'NO';
+            changesOccurred = true;
+            
+            propagatedInsights.push({
+              type: 'intersection_deduction',
+              card: deducedCard,
+              player: p.name,
+              constraintCount: playerConstraints.length,
+              message: `${p.name} MUST have ${deducedCard} (only card in all ${playerConstraints.length} constraints)`
+            });
+            
+            // Eliminate this card from all other constraints for this player
+            playerConstraints.forEach(constraint => {
+              constraint.cards.forEach(card => {
+                if (card !== deducedCard && newMatrix[card][p.name] !== 'NO') {
+                  newMatrix[card][p.name] = 'NO';
+                  changesOccurred = true;
+                }
+              });
+            });
+          }
+        }
+      });
+      
+      // ========================================================================
+      // STEP 3: PROBABILISTIC CONSTRAINT SCORING
+      // If a card appears in 3+ constraints for same player, high probability
+      // ========================================================================
+      players.forEach(p => {
+        const playerConstraints = newConstraints.filter(c => c.showedBy === p.name);
+        const cardFrequency = {};
+        
+        // Count how many constraints each card appears in
+        playerConstraints.forEach(constraint => {
+          const possibleCards = constraint.cards.filter(card => 
+            newMatrix[card][p.name] !== 'NO'
+          );
+          possibleCards.forEach(card => {
+            cardFrequency[card] = (cardFrequency[card] || 0) + 1;
+          });
+        });
+        
+        // If card appears in 3+ constraints AND we have 3+ total constraints
+        Object.entries(cardFrequency).forEach(([card, count]) => {
+          if (count >= 3 && playerConstraints.length >= 3) {
+            // Very high probability this player has this card
+            // This will be used in probability calculations
+            // Note: Not marking as HAS yet (not 100% certain), but flag for high probability
+            if (newMatrix[card][p.name] !== 'HAS') {
+              propagatedInsights.push({
+                type: 'high_probability_pattern',
+                card: card,
+                player: p.name,
+                constraintCount: count,
+                totalConstraints: playerConstraints.length,
+                message: `${p.name} very likely has ${card} (appears in ${count}/${playerConstraints.length} constraints)`
+              });
+            }
+          }
+        });
+      });
+      
+      // ========================================================================
+      // STEP 4: SOLUTION ELIMINATION PROPAGATION
+      // If card is confirmed NOT in solution, and player has constraint with it
+      // Check if that narrows other cards in constraint
+      // ========================================================================
+      newConstraints.forEach(constraint => {
+        const player = constraint.showedBy;
+        const possibleCards = constraint.cards.filter(card => 
+          newMatrix[card][player] !== 'NO' && 
+          newMatrix[card].solution !== 'YES' // Don't include cards confirmed in solution
+        );
+        
+        // Check if any cards in this constraint are in solution
+        const inSolutionCards = constraint.cards.filter(card =>
+          newMatrix[card].solution === 'YES'
+        );
+        
+        // If a card in the constraint is confirmed in solution, player can't have it
+        inSolutionCards.forEach(card => {
+          if (newMatrix[card][player] !== 'NO') {
+            newMatrix[card][player] = 'NO';
+            changesOccurred = true;
+          }
+        });
+      });
+    }
+    
+    // Add all propagated insights to recent insights
+    if (propagatedInsights.length > 0) {
+      setRecentInsights(prev => [...propagatedInsights, ...prev].slice(0, 8));
+    }
     
     const newMove = {
       turn: currentTurn,

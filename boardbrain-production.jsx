@@ -122,6 +122,9 @@ export default function BoardBrain() {
       const cards = CLUE_DATA[category];
       const possibleCards = cards.filter(card => matrix[card]?.solution !== 'NO');
       
+      // First pass: calculate adjusted probabilities
+      const adjustedProbs = {};
+      
       possibleCards.forEach(card => {
         let baseProb = possibleCards.length > 0 ? (1 / possibleCards.length) : 0;
         
@@ -171,8 +174,22 @@ export default function BoardBrain() {
           }
         }
         
-        probs[category][card] = (adjustedProb * 100).toFixed(1);
+        adjustedProbs[card] = adjustedProb;
       });
+      
+      // NORMALIZE: Ensure probabilities sum to exactly 100%
+      const totalProb = Object.values(adjustedProbs).reduce((sum, p) => sum + p, 0);
+      
+      if (totalProb > 0) {
+        possibleCards.forEach(card => {
+          const normalizedProb = (adjustedProbs[card] / totalProb) * 100;
+          probs[category][card] = normalizedProb.toFixed(1);
+        });
+      } else {
+        possibleCards.forEach(card => {
+          probs[category][card] = '0.0';
+        });
+      }
     });
     
     // Detect probability changes and generate insights
@@ -936,7 +953,7 @@ export default function BoardBrain() {
           <div style={{ ...styles.header, marginBottom: '1.5rem' }}>
             <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-              Turn {currentTurn} • {players[currentPlayerIndex]?.name}'s Turn • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
+              Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
             </p>
           </div>
 
@@ -1171,13 +1188,13 @@ export default function BoardBrain() {
                   </div>
 
                   {moveInput.suggester && (
-                    <div>
+                    <div key={`${moveInput.suspect}-${moveInput.weapon}-${moveInput.room}`}>
                       <label style={styles.label}>Player Responses</label>
                       {players.filter(p => p.name !== moveInput.suggester).map(p => {
                         // Check if this player is YOU and if you have any of the suggested cards
                         const isHost = p.name === players[myPlayerIndex]?.name;
                         const suggestedCards = [moveInput.suspect, moveInput.weapon, moveInput.room].filter(c => c);
-                        const hostHasCard = isHost && suggestedCards.some(card => myCards.includes(card));
+                        const hostHasCard = isHost && suggestedCards.length === 3 && suggestedCards.some(card => myCards.includes(card));
                         
                         return (
                           <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

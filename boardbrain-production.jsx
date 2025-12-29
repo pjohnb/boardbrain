@@ -61,6 +61,9 @@ export default function BoardBrain() {
   
   // Report visibility
   const [showReport, setShowReport] = useState(false);
+  
+  // Host Mode (shows all player perspectives + GLOBAL view)
+  const [hostMode, setHostMode] = useState(false);
 
   // Calculate cards per player and remainder
   const cardsPerPlayer = numPlayers ? Math.floor(18 / numPlayers) : 0;
@@ -824,6 +827,122 @@ export default function BoardBrain() {
     };
   };
   
+  // HOST MODE: Get cell state from a SPECIFIC player's perspective
+  const getCellStateForPlayer = (card, columnPlayerName, viewingPlayerIndex) => {
+    const viewingPlayerName = players[viewingPlayerIndex]?.name;
+    
+    // Get the cards this viewing player holds
+    const viewingPlayerCards = viewingPlayerIndex === myPlayerIndex 
+      ? myCards 
+      : []; // In real multiplayer, we'd get their actual cards
+    
+    // PUBLIC/REMAINDER CARD (Green X for all players)
+    if (remainderCards.includes(card)) {
+      return {
+        type: 'PUBLIC',
+        color: '#22c55e',
+        intensity: 0.5,
+        overlay: '✗',
+        border: '#22c55e',
+        borderWidth: 1.5,
+        tooltip: 'Public card'
+      };
+    }
+    
+    // VIEWING PLAYER'S CARD (Purple) - ONLY in their column!
+    if (viewingPlayerCards.includes(card) && columnPlayerName === viewingPlayerName) {
+      return {
+        type: 'MY_CARD',
+        color: '#8b5cf6',
+        intensity: 1.0,
+        overlay: '✓',
+        border: '#8b5cf6',
+        borderWidth: 1.5,
+        tooltip: 'They hold this'
+      };
+    }
+    
+    const matrixValue = knowledgeMatrix[card]?.[columnPlayerName];
+    
+    // CONFIRMED HAS (Blue)
+    if (matrixValue === 'HAS') {
+      // Check if viewing player observed this
+      const privateConstraint = constraints.find(c => 
+        c.showedBy === columnPlayerName && 
+        c.observedBy === viewingPlayerName && 
+        c.revealedCard === card
+      );
+      
+      return {
+        type: 'HAS',
+        color: '#3b82f6',
+        intensity: 1.0,
+        overlay: '✓',
+        border: privateConstraint ? '#fbbf24' : '#3b82f6',
+        borderWidth: privateConstraint ? 2 : 1.5,
+        tooltip: privateConstraint ? 'They saw this' : 'Has'
+      };
+    }
+    
+    // CONFIRMED NO (Green)
+    if (matrixValue === 'NO') {
+      return {
+        type: 'NO',
+        color: '#22c55e',
+        intensity: 0.5,
+        overlay: '✗',
+        border: '#22c55e',
+        borderWidth: 1.5,
+        tooltip: 'Public'
+      };
+    }
+    
+    // Check for CONSTRAINTS
+    const playerConstraints = constraints.filter(c => 
+      c.showedBy === columnPlayerName && 
+      c.cards.includes(card) &&
+      !c.revealedCard
+    );
+    
+    if (playerConstraints.length > 0) {
+      const totalPossible = playerConstraints.reduce((sum, c) => {
+        const possible = c.cards.filter(card => 
+          knowledgeMatrix[card]?.[columnPlayerName] !== 'NO'
+        );
+        return sum + possible.length;
+      }, 0);
+      
+      const avgPossible = totalPossible / playerConstraints.length;
+      
+      let intensity = 0.4;
+      if (avgPossible <= 1.5) intensity = 0.8;
+      else if (avgPossible <= 2.5) intensity = 0.6;
+      
+      return {
+        type: 'CONSTRAINT',
+        color: '#f97316',
+        intensity: intensity,
+        overlay: playerConstraints.length === 1 ? '¹' : 
+                 playerConstraints.length === 2 ? '²' : 
+                 playerConstraints.length >= 3 ? '³⁺' : '?',
+        border: '#f97316',
+        borderWidth: 1.5,
+        tooltip: `${playerConstraints.length} constraint(s)`
+      };
+    }
+    
+    // UNKNOWN (Gray)
+    return {
+      type: 'UNKNOWN',
+      color: '#64748b',
+      intensity: 0.2,
+      overlay: '?',
+      border: '#64748b',
+      borderWidth: 1,
+      tooltip: 'Unknown'
+    };
+  };
+  
   // GENERATE TURN-BY-TURN ANALYSIS REPORT
   const generateReport = () => {
     const myPlayerName = players[myPlayerIndex]?.name;
@@ -1570,12 +1689,29 @@ export default function BoardBrain() {
   if (gamePhase === 'playing') {
     return (
       <div style={styles.container}>
-        <div style={{ maxWidth: '90rem', margin: '0 auto' }}>
-          <div style={{ ...styles.header, marginBottom: '1.5rem' }}>
-            <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
-            <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-              Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • You are Playing as {players[myPlayerIndex]?.name} ({myCharacter})
-            </p>
+        <div style={{ maxWidth: hostMode ? '100%' : '90rem', margin: '0 auto', padding: hostMode ? '0.5rem' : '0' }}>
+          <div style={{ ...styles.header, marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
+              <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+                Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • You are Playing as {players[myPlayerIndex]?.name} ({myCharacter})
+              </p>
+            </div>
+            
+            {/* Host Mode Toggle */}
+            <button
+              onClick={() => setHostMode(!hostMode)}
+              style={{
+                ...styles.button,
+                background: hostMode ? '#10b981' : '#6366f1',
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {hostMode ? '🖥️ HOST MODE' : '👤 Player View'}
+            </button>
           </div>
 
           {/* MY CARDS & PUBLIC CARDS DISPLAY */}
@@ -1664,6 +1800,210 @@ export default function BoardBrain() {
             )}
           </div>
 
+          {/* CONDITIONAL: HOST MODE vs PLAYER VIEW */}
+          {hostMode ? (
+            // HOST MODE: Show all player perspectives + GLOBAL view
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* All Player Grids */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: `repeat(${Math.min(players.length, 3)}, 1fr)`,
+                gap: '1rem'
+              }}>
+                {players.map((player, playerIdx) => (
+                  <div key={player.name} style={{
+                    ...styles.card,
+                    padding: '0.75rem',
+                    backgroundColor: '#1e293b'
+                  }}>
+                    {/* Mini Grid Header */}
+                    <div style={{
+                      textAlign: 'center',
+                      marginBottom: '0.5rem',
+                      paddingBottom: '0.5rem',
+                      borderBottom: '1px solid #334155'
+                    }}>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                        Player {playerIdx + 1}
+                      </div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#e2e8f0' }}>
+                        {player.name}
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: '#64748b' }}>
+                        ({player.character})
+                      </div>
+                    </div>
+
+                    {/* Mini Grid */}
+                    <div style={{ overflowX: 'auto', fontSize: '0.65rem' }}>
+                      {['suspects', 'weapons', 'rooms'].map(category => (
+                        <div key={category} style={{ marginBottom: '0.5rem' }}>
+                          <div style={{ 
+                            color: '#94a3b8', 
+                            fontSize: '0.6rem',
+                            fontWeight: 'bold',
+                            marginBottom: '0.25rem',
+                            textTransform: 'uppercase'
+                          }}>
+                            {category}
+                          </div>
+                          {CLUE_DATA[category].map(card => (
+                            <div key={card} style={{ display: 'flex', marginBottom: '1px' }}>
+                              {/* Card name */}
+                              <div style={{
+                                width: '90px',
+                                fontSize: '0.65rem',
+                                color: '#cbd5e1',
+                                padding: '2px 4px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {card}
+                              </div>
+                              
+                              {/* Cells for each player from THIS player's perspective */}
+                              {players.map(p => {
+                                const cellState = getCellStateForPlayer(card, p.name, playerIdx);
+                                const rgbaColor = `rgba(${parseInt(cellState.color.slice(1,3), 16)}, ${parseInt(cellState.color.slice(3,5), 16)}, ${parseInt(cellState.color.slice(5,7), 16)}, ${cellState.intensity})`;
+                                
+                                return (
+                                  <div
+                                    key={p.name}
+                                    title={cellState.tooltip}
+                                    style={{
+                                      width: '28px',
+                                      height: '20px',
+                                      backgroundColor: rgbaColor,
+                                      border: `${cellState.borderWidth}px solid ${cellState.border}`,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      color: '#ffffff',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  >
+                                    {cellState.overlay}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* GLOBAL VIEW */}
+              <div style={{
+                ...styles.card,
+                padding: '1rem',
+                backgroundColor: '#0f172a',
+                border: '3px solid #fbbf24'
+              }}>
+                <h3 style={{ 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600',
+                  color: '#fbbf24',
+                  marginBottom: '1rem',
+                  textAlign: 'center'
+                }}>
+                  🌐 GLOBAL VIEW (Complete Truth)
+                </h3>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                  {players.map((player, playerIdx) => {
+                    // Get actual cards for this player (only host knows all)
+                    const playerCards = playerIdx === myPlayerIndex ? myCards : [];
+                    
+                    return (
+                      <div key={player.name} style={{
+                        padding: '0.75rem',
+                        backgroundColor: '#1e293b',
+                        borderRadius: '0.375rem',
+                        border: '2px solid #8b5cf6'
+                      }}>
+                        <div style={{ 
+                          fontSize: '0.75rem', 
+                          fontWeight: '600',
+                          color: '#8b5cf6',
+                          marginBottom: '0.5rem'
+                        }}>
+                          {player.name}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#cbd5e1' }}>
+                          {playerCards.length > 0 ? (
+                            playerCards.map(card => (
+                              <div key={card} style={{ marginBottom: '0.25rem' }}>
+                                ✓ {card}
+                              </div>
+                            ))
+                          ) : (
+                            <div style={{ color: '#64748b', fontStyle: 'italic' }}>
+                              (Cards unknown - not viewing player)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Public Cards */}
+                  {remainderCards.length > 0 && (
+                    <div style={{
+                      padding: '0.75rem',
+                      backgroundColor: '#1e293b',
+                      borderRadius: '0.375rem',
+                      border: '2px solid #fbbf24'
+                    }}>
+                      <div style={{ 
+                        fontSize: '0.75rem', 
+                        fontWeight: '600',
+                        color: '#fbbf24',
+                        marginBottom: '0.5rem'
+                      }}>
+                        Public/Set Aside
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#cbd5e1' }}>
+                        {remainderCards.map(card => (
+                          <div key={card} style={{ marginBottom: '0.25rem' }}>
+                            ✗ {card}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* HOST MODE: Move Input Panel */}
+              <div style={{
+                ...styles.card,
+                padding: '1rem',
+                backgroundColor: '#1e293b'
+              }}>
+                <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem', color: '#e2e8f0' }}>
+                  🎮 Queue Move (Updates All Views)
+                </h3>
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  color: '#94a3b8', 
+                  marginBottom: '1rem',
+                  padding: '0.5rem',
+                  backgroundColor: '#0f172a',
+                  borderRadius: '0.375rem'
+                }}>
+                  ℹ️ Use this panel to log moves. All player grids above will update to show their individual perspectives.
+                </div>
+                {/* Move input will be inserted here - continuing to next section */}
+              </div>
+            </div>
+          ) : (
+            // PLAYER VIEW: Normal single-player grid
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
             {/* Deduction Grid */}
             <div style={styles.card}>
@@ -2714,6 +3054,8 @@ export default function BoardBrain() {
               </button>
             </div>
           </div>
+          )}
+          {/* END CONDITIONAL: HOST MODE vs PLAYER VIEW */}
         </div>
       </div>
     );

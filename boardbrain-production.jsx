@@ -38,8 +38,9 @@ export default function BoardBrain() {
   const [previousProbabilities, setPreviousProbabilities] = useState({}); // Track changes
   
   // Constraint tracking
-  const [constraints, setConstraints] = useState([]); // {turn, player, cards: [3 cards], showedBy}
-  const [suggestionFrequency, setSuggestionFrequency] = useState({}); // Track how often each player suggests each card
+  const [constraints, setConstraints] = useState([]); // {turn, suggester, cards, showedBy, observedBy, revealedCard}
+  const [suggestionFrequency, setSuggestionFrequency] = useState({}); // Per-player: {playerName: {card: count}}
+  const [globalSuggestionCount, setGlobalSuggestionCount] = useState({}); // Global: {card: count} - how many times ANY player suggested
   const [playerLocations, setPlayerLocations] = useState({}); // {playerName: roomName}
   const [recentInsights, setRecentInsights] = useState([]); // Deduction explanations
   
@@ -258,7 +259,7 @@ export default function BoardBrain() {
     
     const suggestedCards = [suspect, weapon, room];
     
-    // UPDATE SUGGESTION FREQUENCY (for detecting when players hold cards)
+    // UPDATE SUGGESTION FREQUENCY - PER PLAYER (for detecting when players hold cards)
     const newFrequency = { ...suggestionFrequency };
     if (!newFrequency[suggester]) {
       newFrequency[suggester] = {};
@@ -267,6 +268,13 @@ export default function BoardBrain() {
       newFrequency[suggester][card] = (newFrequency[suggester][card] || 0) + 1;
     });
     setSuggestionFrequency(newFrequency);
+    
+    // UPDATE GLOBAL SUGGESTION COUNT (how many times ANY player suggested this card)
+    const newGlobalCount = { ...globalSuggestionCount };
+    suggestedCards.forEach(card => {
+      newGlobalCount[card] = (newGlobalCount[card] || 0) + 1;
+    });
+    setGlobalSuggestionCount(newGlobalCount);
     
     // UPDATE PLAYER LOCATION (suggester moved to this room)
     const newLocations = { ...playerLocations };
@@ -297,12 +305,16 @@ export default function BoardBrain() {
           newMatrix[card][player.name] = 'NO';
         });
       } else if (response === 'showed' && !constraintCreated) {
-        // CREATE CONSTRAINT: Player showed one of these 3 cards (but we don't know which)
+        // CREATE CONSTRAINT: Player showed one of these 3 cards
+        // This is a PUBLIC constraint - everyone knows someone showed
+        // But only the suggester knows which specific card (private knowledge)
         newConstraints.push({
           turn: currentTurn,
           suggester: suggester,
           cards: suggestedCards,
           showedBy: player.name,
+          observedBy: suggester,  // Who saw the card privately
+          revealedCard: null,     // Set when observer uses "Reveal Card"
           timestamp: new Date().toISOString()
         });
         constraintCreated = true;
@@ -340,6 +352,23 @@ export default function BoardBrain() {
     
     // ============================================================================
     // COMPREHENSIVE CONSTRAINT PROPAGATION ENGINE
+    // 
+    // KEY INSIGHT: PUBLIC vs PRIVATE knowledge
+    // - PUBLIC: Everyone knows when someone shows a card (creates constraint)
+    // - PRIVATE: Only observer knows WHICH card was shown
+    // 
+    // INTERSECTION WORKS ON PUBLIC CONSTRAINTS:
+    // - Everyone can intersect Player X's constraints
+    // - Even if different people observed each constraint
+    // - Math works on public information (eliminations + constraints)
+    // 
+    // Example:
+    //   Turn 3: Alice suggests, David shows to Alice (public constraint)
+    //   Turn 7: Bob suggests, David shows to Bob (public constraint)
+    //   Turn 12: David passes on Rope (public elimination)
+    //   Turn 15: David passes on Study (public elimination)
+    //   → EVERYONE can deduce David must have Mustard!
+    //   → Even though Alice/Bob saw different cards privately
     // ============================================================================
     const propagatedInsights = [];
     let changesOccurred = true;
@@ -576,8 +605,31 @@ export default function BoardBrain() {
     if (!card || !player) return;
     
     const newMatrix = { ...knowledgeMatrix };
+    const newConstraints = [...constraints];
+    
+    // Mark the card as HAS
     newMatrix[card][player] = 'HAS';
     newMatrix[card].solution = 'NO';
+    
+    // LINK TO CONSTRAINT: Find constraint where I observed this player showing
+    const myPlayerName = players[myPlayerIndex]?.name;
+    const matchingConstraint = newConstraints.find(c => 
+      c.showedBy === player && 
+      c.observedBy === myPlayerName &&
+      c.cards.includes(card) &&
+      c.revealedCard === null
+    );
+    
+    if (matchingConstraint) {
+      matchingConstraint.revealedCard = card;
+      
+      // BACKWARD ELIMINATE: Other cards in this constraint
+      matchingConstraint.cards.forEach(c => {
+        if (c !== card && newMatrix[c][player] !== 'NO') {
+          newMatrix[c][player] = 'NO';
+        }
+      });
+    }
     
     const newMove = {
       turn: currentTurn,
@@ -588,11 +640,68 @@ export default function BoardBrain() {
     };
     
     setMoves([...moves, newMove]);
+    setConstraints(newConstraints);
     setKnowledgeMatrix(newMatrix);
-    calculateProbabilities(newMatrix);
-    setCurrentTurn(currentTurn + 1);
+    calculateProbabilities(newMatrix, newConstraints, suggestionFrequency);
     
     setRevealInput({ card: '', player: '' });
+  };
+  
+  // HELPER: What does current player know about this card-player combo?
+  // Returns: 'PUBLIC_HAS' | 'PUBLIC_NO' | 'PRIVATE_HAS' | 'PRIVATE_NO' | 'UNKNOWN'
+  const getKnowledgeLevel = (card, player) => {
+    const myPlayerName = players[myPlayerIndex]?.name;
+    
+    // Do I hold this card?
+    if (myCards.includes(card)) {
+      return 'PRIVATE_HAS';
+    }
+    
+    // Public knowledge from matrix
+    const matrixValue = knowledgeMatrix[card]?.[player];
+    if (matrixValue === 'HAS') {
+      // Check if I observed this privately or it's public
+      const privateConstraint = constraints.find(c => 
+        c.showedBy === player && 
+        c.observedBy === myPlayerName && 
+        c.revealedCard === card
+      );
+      return privateConstraint ? 'PRIVATE_HAS' : 'PUBLIC_HAS';
+    }
+    if (matrixValue === 'NO') {
+      return 'PUBLIC_NO';  // Passes are always public
+    }
+    
+    return 'UNKNOWN';
+  };
+  
+  // HELPER: Get constraint info for card-player combo (for visual display)
+  // Returns count of constraints and whether they're getting narrower
+  const getConstraintInfo = (card, playerName) => {
+    // Find all constraints where this player showed and this card is involved
+    const playerConstraints = constraints.filter(c => 
+      c.showedBy === playerName && c.cards.includes(card)
+    );
+    
+    if (playerConstraints.length === 0) return null;
+    
+    // Count how many of these constraints are still unresolved
+    const unresolvedCount = playerConstraints.filter(c => !c.revealedCard).length;
+    
+    // Calculate total possible cards across all constraints
+    const totalPossible = playerConstraints.reduce((sum, c) => {
+      const possible = c.cards.filter(card => 
+        knowledgeMatrix[card]?.[playerName] !== 'NO'
+      );
+      return sum + possible.length;
+    }, 0);
+    
+    return {
+      constraintCount: playerConstraints.length,
+      unresolvedCount: unresolvedCount,
+      totalPossibleCards: totalPossible,
+      averagePossible: totalPossible / playerConstraints.length
+    };
   };
 
   // Styles
@@ -1591,6 +1700,7 @@ export default function BoardBrain() {
               setPreviousProbabilities({});
               setConstraints([]);
               setSuggestionFrequency({});
+              setGlobalSuggestionCount({});
               setPlayerLocations({});
               setRecentInsights([]);
             }}

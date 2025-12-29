@@ -1690,10 +1690,17 @@ export default function BoardBrain() {
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: hostMode ? '100%' : '90rem', margin: '0 auto', padding: hostMode ? '0.5rem' : '0' }}>
-          <div style={{ ...styles.header, marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+          <div style={{ 
+            marginBottom: '1.5rem', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            textAlign: 'left',
+            gap: '1rem'
+          }}>
+            <div style={{ flex: '1' }}>
+              <h1 style={{ ...styles.title, fontSize: '2.5rem', textAlign: 'center' }}>BoardBrain™</h1>
+              <p style={{ color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center' }}>
                 Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • You are Playing as {players[myPlayerIndex]?.name} ({myCharacter})
               </p>
             </div>
@@ -1707,7 +1714,8 @@ export default function BoardBrain() {
                 padding: '0.5rem 1rem',
                 fontSize: '0.875rem',
                 fontWeight: '600',
-                whiteSpace: 'nowrap'
+                whiteSpace: 'nowrap',
+                flexShrink: 0
               }}
             >
               {hostMode ? '🖥️ HOST MODE' : '👤 Player View'}
@@ -1898,6 +1906,77 @@ export default function BoardBrain() {
                 ))}
               </div>
 
+              {/* LEGEND - Compact for Host Mode */}
+              <div style={{
+                ...styles.card,
+                padding: '0.75rem',
+                backgroundColor: '#1e293b',
+                marginBottom: '0.5rem'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-around',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                  fontSize: '0.7rem',
+                  color: '#cbd5e1'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      backgroundColor: '#8b5cf6',
+                      border: '1.5px solid #8b5cf6'
+                    }}></div>
+                    <span>Purple = Their card</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      backgroundColor: '#3b82f6',
+                      border: '1.5px solid #3b82f6'
+                    }}></div>
+                    <span>Blue = Has</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                      border: '1.5px solid #f97316'
+                    }}></div>
+                    <span>Orange = Constraint</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      backgroundColor: 'rgba(34, 197, 94, 0.5)',
+                      border: '1.5px solid #22c55e'
+                    }}></div>
+                    <span>Green = Public</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      backgroundColor: 'rgba(100, 116, 139, 0.2)',
+                      border: '1px solid #64748b'
+                    }}></div>
+                    <span>Gray = Unknown</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      border: '2px solid #fbbf24'
+                    }}></div>
+                    <span>Gold = Saw</span>
+                  </div>
+                </div>
+              </div>
+
               {/* GLOBAL VIEW */}
               <div style={{
                 ...styles.card,
@@ -1999,7 +2078,195 @@ export default function BoardBrain() {
                 }}>
                   ℹ️ Use this panel to log moves. All player grids above will update to show their individual perspectives.
                 </div>
-                {/* Move input will be inserted here - continuing to next section */}
+                
+                {/* Complete Move Input Form */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={styles.label}>Who Made Suggestion?</label>
+                    <select
+                      style={styles.select}
+                      value={moveInput.suggester}
+                      onChange={(e) => setMoveInput({...moveInput, suggester: e.target.value})}
+                    >
+                      <option value="">Select player</option>
+                      {players.map(p => (
+                        <option key={p.name} value={p.name}>{p.name} ({p.character})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={styles.label}>Suspect</label>
+                    <select
+                      style={styles.select}
+                      value={moveInput.suspect}
+                      onChange={(e) => setMoveInput({...moveInput, suspect: e.target.value})}
+                    >
+                      <option value="">Select suspect</option>
+                      {CLUE_DATA.suspects.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={styles.label}>Weapon</label>
+                    <select
+                      style={styles.select}
+                      value={moveInput.weapon}
+                      onChange={(e) => setMoveInput({...moveInput, weapon: e.target.value})}
+                    >
+                      <option value="">Select weapon</option>
+                      {CLUE_DATA.weapons.map(w => (
+                        <option key={w} value={w}>{w}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={styles.label}>Room</label>
+                    <select
+                      style={styles.select}
+                      value={moveInput.room}
+                      onChange={(e) => setMoveInput({...moveInput, room: e.target.value})}
+                    >
+                      <option value="">Select room</option>
+                      {CLUE_DATA.rooms.map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {moveInput.suggester && (
+                    <div key={`${moveInput.suspect}-${moveInput.weapon}-${moveInput.room}`}>
+                      <label style={styles.label}>Player Responses</label>
+                      {(() => {
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
+                        
+                        let canRespond = true;
+                        
+                        return responseOrder.map(p => {
+                          const isHost = p.name === players[myPlayerIndex]?.name;
+                          const suggestedCards = [moveInput.suspect, moveInput.weapon, moveInput.room].filter(c => c);
+                          const hostHasCard = isHost && suggestedCards.length === 3 && suggestedCards.some(card => myCards.includes(card));
+                          
+                          const playerCanRespond = canRespond;
+                          const playerResponse = moveInput.responses[p.name];
+                          
+                          if (playerResponse === 'showed') {
+                            canRespond = false;
+                          } else if (playerResponse === 'passed') {
+                            canRespond = true;
+                          } else if (playerCanRespond) {
+                            canRespond = false;
+                          }
+                          
+                          return (
+                            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                              <span style={{ 
+                                fontSize: '0.75rem', 
+                                color: playerCanRespond ? '#cbd5e1' : '#64748b' 
+                              }}>
+                                {p.name}{isHost ? ' (YOU)' : ''}
+                              </span>
+                              <select
+                                style={{ 
+                                  ...styles.select, 
+                                  width: 'auto', 
+                                  fontSize: '0.75rem', 
+                                  padding: '0.25rem',
+                                  opacity: playerCanRespond ? 1 : 0.5,
+                                  cursor: playerCanRespond ? 'pointer' : 'not-allowed'
+                                }}
+                                value={moveInput.responses[p.name] || ''}
+                                disabled={!playerCanRespond}
+                                onChange={(e) => setMoveInput({
+                                  ...moveInput,
+                                  responses: {...moveInput.responses, [p.name]: e.target.value}
+                                })}
+                              >
+                                <option value="">Select</option>
+                                {!hostHasCard && <option value="passed">Passed</option>}
+                                <option value="showed">Showed Card</option>
+                              </select>
+                              {hostHasCard && playerCanRespond && (
+                                <span style={{ fontSize: '0.65rem', color: '#fbbf24', marginLeft: '0.5rem' }}>
+                                  Must show!
+                                </span>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={logMove}
+                      disabled={(() => {
+                        if (!moveInput.suggester || !moveInput.suspect || !moveInput.weapon || !moveInput.room) {
+                          return true;
+                        }
+                        
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
+                        
+                        let allValid = true;
+                        for (const player of responseOrder) {
+                          const response = moveInput.responses[player.name];
+                          
+                          if (response === 'showed') {
+                            break;
+                          } else if (response === 'passed') {
+                            continue;
+                          } else {
+                            allValid = false;
+                            break;
+                          }
+                        }
+                        
+                        return !allValid;
+                      })()}
+                      style={{
+                        ...styles.button,
+                        flex: 2,
+                        background: '#2563eb',
+                        opacity: 0.9
+                      }}
+                    >
+                      Log Move
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        const nextPlayer = players[currentPlayerIndex]?.name;
+                        const nextPlayerRoom = playerLocations[nextPlayer] || '';
+                        setMoveInput({
+                          suggester: nextPlayer,
+                          suspect: '',
+                          weapon: '',
+                          room: nextPlayerRoom,
+                          responses: {}
+                        });
+                      }}
+                      style={{
+                        ...styles.button,
+                        flex: 1,
+                        background: '#dc2626'
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (

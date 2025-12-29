@@ -1266,8 +1266,94 @@ export default function BoardBrain() {
           <div style={{ ...styles.header, marginBottom: '1.5rem' }}>
             <h1 style={{ ...styles.title, fontSize: '2.5rem' }}>BoardBrain™</h1>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-              Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • Playing as {players[myPlayerIndex]?.name} ({myCharacter})
+              Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • You are Playing as {players[myPlayerIndex]?.name} ({myCharacter})
             </p>
+          </div>
+
+          {/* MY CARDS & PUBLIC CARDS DISPLAY */}
+          <div style={{ 
+            display: 'flex', 
+            gap: '1rem', 
+            marginBottom: '1.5rem',
+            flexWrap: 'wrap'
+          }}>
+            {/* My Cards */}
+            <div style={{
+              ...styles.card,
+              flex: '1 1 300px',
+              padding: '1rem',
+              backgroundColor: '#1e293b',
+              border: '2px solid #8b5cf6'
+            }}>
+              <h4 style={{ 
+                fontSize: '0.875rem', 
+                fontWeight: '600',
+                color: '#8b5cf6',
+                marginBottom: '0.75rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
+              }}>
+                🎴 My Cards ({myCards.length})
+              </h4>
+              <div style={{ 
+                display: 'flex', 
+                flexWrap: 'wrap', 
+                gap: '0.5rem' 
+              }}>
+                {myCards.map(card => (
+                  <span key={card} style={{
+                    padding: '0.375rem 0.75rem',
+                    backgroundColor: '#8b5cf6',
+                    color: 'white',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}>
+                    {card}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Public/Remainder Cards */}
+            {remainderCards.length > 0 && (
+              <div style={{
+                ...styles.card,
+                flex: '1 1 300px',
+                padding: '1rem',
+                backgroundColor: '#1e293b',
+                border: '2px solid #fbbf24'
+              }}>
+                <h4 style={{ 
+                  fontSize: '0.875rem', 
+                  fontWeight: '600',
+                  color: '#fbbf24',
+                  marginBottom: '0.75rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  👁️ Public/Remainder Cards ({remainderCards.length})
+                </h4>
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '0.5rem' 
+                }}>
+                  {remainderCards.map(card => (
+                    <span key={card} style={{
+                      padding: '0.375rem 0.75rem',
+                      backgroundColor: '#fbbf24',
+                      color: '#0f172a',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}>
+                      {card}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>

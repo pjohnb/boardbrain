@@ -1963,7 +1963,7 @@ export default function BoardBrain() {
                       ...players.slice(0, suggesterIndex)
                     ];
                     
-                    // Find players who need to respond (up to first "showed")
+                    // Find NEXT player who needs to respond (in order)
                     const unrespondedPlayers = [];
                     for (const player of responseOrder) {
                       const response = moveInput.responses[player.name];
@@ -1975,15 +1975,16 @@ export default function BoardBrain() {
                         // They passed, continue to next
                         continue;
                       } else {
-                        // No response yet - they need to respond
+                        // No response yet - THIS is who we're waiting for
                         unrespondedPlayers.push(player);
+                        break;  // Don't check players after this one!
                       }
                     }
                     
                     if (unrespondedPlayers.length > 0) {
                       return (
                         <p style={{ fontSize: '0.75rem', color: '#fbbf24', marginTop: '0.5rem' }}>
-                          ⚠️ Waiting for response from: {unrespondedPlayers.map(p => p.name).join(', ')}
+                          ⚠️ Waiting for response from: {unrespondedPlayers[0].name}
                         </p>
                       );
                     }

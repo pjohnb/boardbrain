@@ -1818,19 +1818,32 @@ export default function BoardBrain() {
                         return true;
                       }
                       
-                      // Check that all other players have responded
+                      // Check that players have responded IN ORDER until someone shows
                       const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
                       const responseOrder = [
                         ...players.slice(suggesterIndex + 1),
                         ...players.slice(0, suggesterIndex)
                       ];
                       
-                      // All players in response order must have a response
-                      const allResponded = responseOrder.every(p => 
-                        moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
-                      );
+                      // Go through players in order - stop at first "showed"
+                      let allValid = true;
+                      for (const player of responseOrder) {
+                        const response = moveInput.responses[player.name];
+                        
+                        if (response === 'showed') {
+                          // Someone showed - turn is complete!
+                          break;
+                        } else if (response === 'passed') {
+                          // They passed, continue to next player
+                          continue;
+                        } else {
+                          // No response yet - not valid
+                          allValid = false;
+                          break;
+                        }
+                      }
                       
-                      return !allResponded;
+                      return !allValid;
                     })()}
                     style={{
                       ...styles.button,
@@ -1844,11 +1857,19 @@ export default function BoardBrain() {
                           ...players.slice(suggesterIndex + 1),
                           ...players.slice(0, suggesterIndex)
                         ];
-                        const allResponded = responseOrder.every(p => 
-                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
-                        );
                         
-                        return allResponded ? '#2563eb' : '#374151';
+                        let allValid = true;
+                        for (const player of responseOrder) {
+                          const response = moveInput.responses[player.name];
+                          if (response === 'showed') break;
+                          else if (response === 'passed') continue;
+                          else {
+                            allValid = false;
+                            break;
+                          }
+                        }
+                        
+                        return allValid ? '#2563eb' : '#374151';
                       })(),
                       cursor: (() => {
                         const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
@@ -1859,11 +1880,19 @@ export default function BoardBrain() {
                           ...players.slice(suggesterIndex + 1),
                           ...players.slice(0, suggesterIndex)
                         ];
-                        const allResponded = responseOrder.every(p => 
-                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
-                        );
                         
-                        return allResponded ? 'pointer' : 'not-allowed';
+                        let allValid = true;
+                        for (const player of responseOrder) {
+                          const response = moveInput.responses[player.name];
+                          if (response === 'showed') break;
+                          else if (response === 'passed') continue;
+                          else {
+                            allValid = false;
+                            break;
+                          }
+                        }
+                        
+                        return allValid ? 'pointer' : 'not-allowed';
                       })(),
                       opacity: (() => {
                         const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
@@ -1874,11 +1903,19 @@ export default function BoardBrain() {
                           ...players.slice(suggesterIndex + 1),
                           ...players.slice(0, suggesterIndex)
                         ];
-                        const allResponded = responseOrder.every(p => 
-                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
-                        );
                         
-                        return allResponded ? 1 : 0.5;
+                        let allValid = true;
+                        for (const player of responseOrder) {
+                          const response = moveInput.responses[player.name];
+                          if (response === 'showed') break;
+                          else if (response === 'passed') continue;
+                          else {
+                            allValid = false;
+                            break;
+                          }
+                        }
+                        
+                        return allValid ? 1 : 0.5;
                       })()
                     }}
                   >
@@ -1926,14 +1963,27 @@ export default function BoardBrain() {
                       ...players.slice(0, suggesterIndex)
                     ];
                     
-                    const unrespondedPlayers = responseOrder.filter(p => 
-                      !moveInput.responses[p.name] || (moveInput.responses[p.name] !== 'passed' && moveInput.responses[p.name] !== 'showed')
-                    );
+                    // Find players who need to respond (up to first "showed")
+                    const unrespondedPlayers = [];
+                    for (const player of responseOrder) {
+                      const response = moveInput.responses[player.name];
+                      
+                      if (response === 'showed') {
+                        // Someone showed - turn is complete!
+                        break;
+                      } else if (response === 'passed') {
+                        // They passed, continue to next
+                        continue;
+                      } else {
+                        // No response yet - they need to respond
+                        unrespondedPlayers.push(player);
+                      }
+                    }
                     
                     if (unrespondedPlayers.length > 0) {
                       return (
                         <p style={{ fontSize: '0.75rem', color: '#fbbf24', marginTop: '0.5rem' }}>
-                          ⚠️ Waiting for responses from: {unrespondedPlayers.map(p => p.name).join(', ')}
+                          ⚠️ Waiting for response from: {unrespondedPlayers.map(p => p.name).join(', ')}
                         </p>
                       );
                     }

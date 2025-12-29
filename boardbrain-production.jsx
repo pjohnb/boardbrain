@@ -711,6 +711,106 @@ export default function BoardBrain() {
     };
   };
   
+  // VISUAL GRID: Get cell display state for card-player combination
+  const getCellState = (card, playerName) => {
+    const myPlayerName = players[myPlayerIndex]?.name;
+    
+    // MY CARD (Purple)
+    if (myCards.includes(card)) {
+      return {
+        type: 'MY_CARD',
+        color: '#8b5cf6',
+        intensity: 1.0,
+        overlay: '✓',
+        border: '#8b5cf6',
+        borderWidth: 2,
+        tooltip: 'You hold this card'
+      };
+    }
+    
+    const matrixValue = knowledgeMatrix[card]?.[playerName];
+    
+    // CONFIRMED HAS (Blue)
+    if (matrixValue === 'HAS') {
+      // Check if private knowledge (you observed this)
+      const privateConstraint = constraints.find(c => 
+        c.showedBy === playerName && 
+        c.observedBy === myPlayerName && 
+        c.revealedCard === card
+      );
+      
+      return {
+        type: 'HAS',
+        color: '#3b82f6',
+        intensity: 1.0,
+        overlay: '✓',
+        border: privateConstraint ? '#fbbf24' : '#3b82f6',
+        borderWidth: privateConstraint ? 3 : 2,
+        tooltip: privateConstraint ? 'You saw this card' : 'Has this card'
+      };
+    }
+    
+    // CONFIRMED NO (Green)
+    if (matrixValue === 'NO') {
+      return {
+        type: 'NO',
+        color: '#22c55e',
+        intensity: 0.5,
+        overlay: '✗',
+        border: '#22c55e',
+        borderWidth: 2,
+        tooltip: 'Doesn\'t have this card'
+      };
+    }
+    
+    // Check for CONSTRAINTS (Orange/Red)
+    const playerConstraints = constraints.filter(c => 
+      c.showedBy === playerName && 
+      c.cards.includes(card) &&
+      !c.revealedCard
+    );
+    
+    if (playerConstraints.length > 0) {
+      // Calculate how narrow the constraints are
+      const totalPossible = playerConstraints.reduce((sum, c) => {
+        const possible = c.cards.filter(card => 
+          knowledgeMatrix[card]?.[playerName] !== 'NO'
+        );
+        return sum + possible.length;
+      }, 0);
+      
+      const avgPossible = totalPossible / playerConstraints.length;
+      
+      // Intensity based on constraint narrowness
+      let intensity = 0.4; // Wide (3+ options avg)
+      if (avgPossible <= 1.5) intensity = 0.8; // Very narrow (1-2 options)
+      else if (avgPossible <= 2.5) intensity = 0.6; // Medium (2-3 options)
+      
+      return {
+        type: 'CONSTRAINT',
+        color: '#f97316',
+        intensity: intensity,
+        overlay: playerConstraints.length === 1 ? '¹' : 
+                 playerConstraints.length === 2 ? '²' : 
+                 playerConstraints.length >= 3 ? '³⁺' : '?',
+        border: '#f97316',
+        borderWidth: 2,
+        tooltip: `${playerConstraints.length} constraint(s), ~${avgPossible.toFixed(1)} options avg`
+      };
+    }
+    
+    // UNKNOWN (Gray)
+    return {
+      type: 'UNKNOWN',
+      color: '#64748b',
+      intensity: 0.2,
+      overlay: '?',
+      border: '#64748b',
+      borderWidth: 1,
+      tooltip: 'No information'
+    };
+  };
+  
   // GENERATE TURN-BY-TURN ANALYSIS REPORT
   const generateReport = () => {
     const myPlayerName = players[myPlayerIndex]?.name;
@@ -1566,115 +1666,233 @@ export default function BoardBrain() {
               }}>
                 <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#cbd5e1' }}>Legend:</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', color: '#94a3b8' }}>
-                  <div><span style={{ color: '#4ade80' }}>✓</span> = Has card</div>
-                  <div><span style={{ color: '#f87171' }}>✗</span> = Doesn't have</div>
-                  <div><span style={{ color: '#fbbf24' }}>⊕</span> = Likely holds (3+ suggestions)</div>
-                  <div><span style={{ color: '#64748b' }}>?</span> = Unknown</div>
-                  <div><span style={{ color: '#fbbf24' }}>★</span> = In solution</div>
-                  <div><span style={{ fontSize: '0.75rem' }}>²</span> = Suggestion count</div>
-                  <div><span style={{ color: '#4ade80' }}>80%+</span> = Very likely</div>
-                  <div><span style={{ color: '#fbbf24' }}>50-79%</span> = Moderate</div>
-                  <div><span style={{ color: '#fb923c' }}>20-49%</span> = Lower</div>
-                  <div>↑↓ = Recent change</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    backgroundColor: '#8b5cf6', 
+                    border: '2px solid #8b5cf6',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Purple = Your cards</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    backgroundColor: '#3b82f6', 
+                    border: '2px solid #3b82f6',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Blue = Has card</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    backgroundColor: 'rgba(249, 115, 22, 0.6)', 
+                    border: '2px solid #f97316',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Orange = Constrained</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    backgroundColor: 'rgba(34, 197, 94, 0.5)', 
+                    border: '2px solid #22c55e',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Green = Doesn't have</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    backgroundColor: 'rgba(100, 116, 139, 0.2)', 
+                    border: '1px solid #64748b',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Gray = Unknown</div>
+                  <div><span style={{ 
+                    display: 'inline-block', 
+                    width: '16px', 
+                    height: '16px', 
+                    border: '3px solid #fbbf24',
+                    marginRight: '4px',
+                    verticalAlign: 'middle'
+                  }}></span> Gold border = You saw</div>
+                  <div style={{ gridColumn: '1 / -1', marginTop: '0.25rem', fontSize: '0.75rem' }}>
+                    ✓ = Has  •  ✗ = No  •  ? = Unknown  •  ¹²³ = Constraint count
+                  </div>
                 </div>
               </div>
               
               <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...styles.th, textAlign: 'left' }}>Card</th>
-                      {players.map((p, idx) => (
-                        <th key={p.name} style={styles.th} title={`${p.name} (${p.character})`}>
-                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.15rem' }}>
-                            P{idx + 1}
-                          </div>
-                          <div>
-                            {p.name.split(' ')[0]}
-                          </div>
-                        </th>
-                      ))}
-                      <th style={styles.th}>Sol</th>
-                      <th style={styles.th}>%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {['suspects', 'weapons', 'rooms'].map(category => (
-                      <React.Fragment key={category}>
-                        <tr style={{ backgroundColor: '#1e293b' }}>
-                          <td colSpan={numPlayers + 3} style={{ ...styles.td, color: '#94a3b8', fontWeight: 'bold', textAlign: 'left' }}>
-                            {category.toUpperCase()}
-                          </td>
-                        </tr>
-                        {CLUE_DATA[category].map(card => (
-                          <tr key={card}>
-                            <td style={{ ...styles.td, textAlign: 'left', color: '#e2e8f0' }}>{card}</td>
-                            {players.map(p => {
-                              const freq = suggestionFrequency[p.name]?.[card] || 0;
-                              const likelyHolds = freq >= 3;
-                              
-                              return (
-                                <td key={p.name} style={styles.td}>
-                                  <span style={{
-                                    color: knowledgeMatrix[card]?.[p.name] === 'HAS' ? '#4ade80' :
-                                           knowledgeMatrix[card]?.[p.name] === 'NO' ? '#f87171' : 
-                                           likelyHolds ? '#fbbf24' : '#64748b'
-                                  }}>
-                                    {knowledgeMatrix[card]?.[p.name] === 'HAS' ? '✓' :
-                                     knowledgeMatrix[card]?.[p.name] === 'NO' ? '✗' :
-                                     likelyHolds ? '⊕' : '?'}
-                                  </span>
-                                  {freq > 0 && (
-                                    <span style={{ fontSize: '0.65rem', color: '#64748b', marginLeft: '2px' }}>
-                                      {freq}
-                                    </span>
-                                  )}
-                                </td>
-                              );
-                            })}
-                            <td style={styles.td}>
-                              <span style={{
-                                color: knowledgeMatrix[card]?.solution === 'YES' ? '#fbbf24' :
-                                       knowledgeMatrix[card]?.solution === 'NO' ? '#f87171' : '#64748b'
-                              }}>
-                                {knowledgeMatrix[card]?.solution === 'YES' ? '★' :
-                                 knowledgeMatrix[card]?.solution === 'NO' ? '✗' : '?'}
-                              </span>
-                            </td>
-                            <td style={styles.td}>
-                              {(() => {
-                                const prob = parseFloat(probabilities[category]?.[card] || 0);
-                                const prevProb = parseFloat(previousProbabilities[category]?.[card] || prob);
-                                const change = prob - prevProb;
-                                
-                                // Color based on probability (high = green, med = yellow, low = gray)
-                                let color = '#64748b'; // Default gray
-                                if (prob >= 80) color = '#4ade80'; // Bright green - very likely solution
-                                else if (prob >= 50) color = '#fbbf24'; // Yellow - moderate
-                                else if (prob >= 20) color = '#fb923c'; // Orange - lower
-                                
-                                // Arrow indicator for significant changes
-                                let arrow = '';
-                                if (Math.abs(change) > 10) {
-                                  arrow = change > 0 ? ' ↑' : ' ↓';
-                                }
-                                
-                                return (
-                                  <span style={{ 
-                                    color: color,
-                                    fontWeight: prob >= 70 ? 'bold' : 'normal'
-                                  }}>
-                                    {prob.toFixed(0)}%{arrow}
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
+                {/* Visual Grid */}
+                <div style={{ 
+                  display: 'inline-block',
+                  minWidth: '100%'
+                }}>
+                  {/* Header Row */}
+                  <div style={{ display: 'flex', marginBottom: '0px' }}>
+                    {/* Card column header */}
+                    <div style={{ 
+                      width: '120px', 
+                      minWidth: '120px',
+                      padding: '0.5rem',
+                      fontWeight: '600',
+                      color: '#cbd5e1'
+                    }}>
+                      Card
+                    </div>
+                    
+                    {/* Player columns */}
+                    {players.map((p, idx) => (
+                      <div key={p.name} style={{ 
+                        width: '80px',
+                        minWidth: '80px',
+                        padding: '0.25rem',
+                        textAlign: 'center',
+                        fontWeight: '600',
+                        color: '#cbd5e1'
+                      }}>
+                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '0.15rem' }}>
+                          Player {idx + 1}
+                        </div>
+                        <div style={{ fontSize: '0.85rem' }}>
+                          {p.name}
+                        </div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                    
+                    {/* Solution column */}
+                    <div style={{ 
+                      width: '80px',
+                      minWidth: '80px',
+                      padding: '0.5rem',
+                      textAlign: 'center',
+                      fontWeight: '600',
+                      color: '#cbd5e1'
+                    }}>
+                      Solution
+                    </div>
+                  </div>
+                  
+                  {/* Card Rows */}
+                  {['suspects', 'weapons', 'rooms'].map(category => (
+                    <div key={category}>
+                      {/* Category Header */}
+                      <div style={{ 
+                        display: 'flex',
+                        backgroundColor: '#1e293b',
+                        padding: '0.375rem 0.5rem',
+                        marginTop: '0.5rem'
+                      }}>
+                        <div style={{ 
+                          width: '100%',
+                          color: '#94a3b8',
+                          fontWeight: 'bold',
+                          fontSize: '0.8rem',
+                          letterSpacing: '0.05em'
+                        }}>
+                          {category.toUpperCase()}
+                        </div>
+                      </div>
+                      
+                      {/* Cards in this category */}
+                      {CLUE_DATA[category].map(card => (
+                        <div key={card} style={{ display: 'flex' }}>
+                          {/* Card name */}
+                          <div style={{ 
+                            width: '120px',
+                            minWidth: '120px',
+                            padding: '0.5rem',
+                            color: '#e2e8f0',
+                            fontSize: '0.875rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            backgroundColor: '#0f172a'
+                          }}>
+                            {card}
+                          </div>
+                          
+                          {/* Player cells - ADJACENT with colored borders */}
+                          {players.map(p => {
+                            const cellState = getCellState(card, p.name);
+                            const rgbaColor = `rgba(${parseInt(cellState.color.slice(1,3), 16)}, ${parseInt(cellState.color.slice(3,5), 16)}, ${parseInt(cellState.color.slice(5,7), 16)}, ${cellState.intensity})`;
+                            
+                            return (
+                              <div
+                                key={p.name}
+                                title={cellState.tooltip}
+                                style={{
+                                  width: '80px',
+                                  minWidth: '80px',
+                                  height: '50px',
+                                  backgroundColor: rgbaColor,
+                                  border: `${cellState.borderWidth}px solid ${cellState.border}`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '1.25rem',
+                                  fontWeight: '600',
+                                  color: '#ffffff',
+                                  cursor: 'default',
+                                  transition: 'filter 0.2s',
+                                  boxSizing: 'border-box'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.2)'}
+                                onMouseLeave={(e) => e.currentTarget.style.filter = 'brightness(1)'}
+                              >
+                                {cellState.overlay}
+                              </div>
+                            );
+                          })}
+                          
+                          {/* Solution cell */}
+                          {(() => {
+                            const solValue = knowledgeMatrix[card]?.solution;
+                            let cellColor, cellOverlay, cellBorder;
+                            
+                            if (solValue === 'YES') {
+                              cellColor = 'rgba(251, 191, 36, 1.0)';
+                              cellOverlay = '★';
+                              cellBorder = '#fbbf24';
+                            } else if (solValue === 'NO') {
+                              cellColor = 'rgba(34, 197, 94, 0.5)';
+                              cellOverlay = '✗';
+                              cellBorder = '#22c55e';
+                            } else {
+                              cellColor = 'rgba(100, 116, 139, 0.2)';
+                              cellOverlay = '?';
+                              cellBorder = '#64748b';
+                            }
+                            
+                            return (
+                              <div
+                                style={{
+                                  width: '80px',
+                                  minWidth: '80px',
+                                  height: '50px',
+                                  backgroundColor: cellColor,
+                                  border: `2px solid ${cellBorder}`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '1.25rem',
+                                  fontWeight: '600',
+                                  color: '#ffffff',
+                                  cursor: 'default',
+                                  boxSizing: 'border-box'
+                                }}
+                              >
+                                {cellOverlay}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 

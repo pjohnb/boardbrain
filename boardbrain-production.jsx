@@ -1809,17 +1809,137 @@ export default function BoardBrain() {
                     </div>
                   )}
 
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
                     onClick={logMove}
-                    disabled={!moveInput.suggester || !moveInput.suspect || !moveInput.weapon || !moveInput.room}
+                    disabled={(() => {
+                      // Check basic fields
+                      if (!moveInput.suggester || !moveInput.suspect || !moveInput.weapon || !moveInput.room) {
+                        return true;
+                      }
+                      
+                      // Check that all other players have responded
+                      const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                      const responseOrder = [
+                        ...players.slice(suggesterIndex + 1),
+                        ...players.slice(0, suggesterIndex)
+                      ];
+                      
+                      // All players in response order must have a response
+                      const allResponded = responseOrder.every(p => 
+                        moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
+                      );
+                      
+                      return !allResponded;
+                    })()}
                     style={{
                       ...styles.button,
-                      background: '#2563eb',
-                      ...(!moveInput.suggester || !moveInput.suspect || !moveInput.weapon || !moveInput.room ? styles.buttonDisabled : {})
+                      flex: 2,
+                      background: (() => {
+                        const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
+                        if (!basicValid) return '#374151';
+                        
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
+                        const allResponded = responseOrder.every(p => 
+                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
+                        );
+                        
+                        return allResponded ? '#2563eb' : '#374151';
+                      })(),
+                      cursor: (() => {
+                        const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
+                        if (!basicValid) return 'not-allowed';
+                        
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
+                        const allResponded = responseOrder.every(p => 
+                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
+                        );
+                        
+                        return allResponded ? 'pointer' : 'not-allowed';
+                      })(),
+                      opacity: (() => {
+                        const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
+                        if (!basicValid) return 0.5;
+                        
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
+                        const allResponded = responseOrder.every(p => 
+                          moveInput.responses[p.name] === 'passed' || moveInput.responses[p.name] === 'showed'
+                        );
+                        
+                        return allResponded ? 1 : 0.5;
+                      })()
                     }}
                   >
                     Log Move
                   </button>
+                  
+                  <button
+                    onClick={() => {
+                      const nextPlayer = players[currentPlayerIndex]?.name;
+                      const nextPlayerRoom = playerLocations[nextPlayer] || '';
+                      setMoveInput({
+                        suggester: nextPlayer,
+                        suspect: '',
+                        weapon: '',
+                        room: nextPlayerRoom,
+                        responses: {}
+                      });
+                    }}
+                    style={{
+                      ...styles.button,
+                      flex: 1,
+                      background: 'transparent',
+                      border: '1px solid #ef4444',
+                      color: '#ef4444'
+                    }}
+                  >
+                    Clear
+                  </button>
+                  </div>
+                  
+                  {/* Validation Message */}
+                  {(() => {
+                    const basicValid = moveInput.suggester && moveInput.suspect && moveInput.weapon && moveInput.room;
+                    if (!basicValid) {
+                      return (
+                        <p style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '0.5rem' }}>
+                          ⚠️ Fill in all fields (suggester, suspect, weapon, room)
+                        </p>
+                      );
+                    }
+                    
+                    const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                    const responseOrder = [
+                      ...players.slice(suggesterIndex + 1),
+                      ...players.slice(0, suggesterIndex)
+                    ];
+                    
+                    const unrespondedPlayers = responseOrder.filter(p => 
+                      !moveInput.responses[p.name] || (moveInput.responses[p.name] !== 'passed' && moveInput.responses[p.name] !== 'showed')
+                    );
+                    
+                    if (unrespondedPlayers.length > 0) {
+                      return (
+                        <p style={{ fontSize: '0.75rem', color: '#fbbf24', marginTop: '0.5rem' }}>
+                          ⚠️ Waiting for responses from: {unrespondedPlayers.map(p => p.name).join(', ')}
+                        </p>
+                      );
+                    }
+                    
+                    return null;
+                  })()}
                 </div>
               </div>
 

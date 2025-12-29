@@ -58,6 +58,9 @@ export default function BoardBrain() {
     card: '',
     player: ''
   });
+  
+  // Report visibility
+  const [showReport, setShowReport] = useState(false);
 
   // Calculate cards per player and remainder
   const cardsPerPlayer = numPlayers ? Math.floor(18 / numPlayers) : 0;
@@ -573,7 +576,11 @@ export default function BoardBrain() {
       suggestion: { suspect, weapon, room },
       responses,
       location: room,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      // ENHANCED TRACKING FOR REPORT
+      constraintsCreated: newConstraints.filter(c => c.turn === currentTurn),
+      insightsGenerated: propagatedInsights,
+      gridChanges: [] // Will be populated by comparing matrices
     };
     
     setMoves([...moves, newMove]);
@@ -678,6 +685,184 @@ export default function BoardBrain() {
   // HELPER: Get constraint info for card-player combo (for visual display)
   // Returns count of constraints and whether they're getting narrower
   const getConstraintInfo = (card, playerName) => {
+    // Find all constraints where this player showed and this card is involved
+    const playerConstraints = constraints.filter(c => 
+      c.showedBy === playerName && c.cards.includes(card)
+    );
+    
+    if (playerConstraints.length === 0) return null;
+    
+    // Count how many of these constraints are still unresolved
+    const unresolvedCount = playerConstraints.filter(c => !c.revealedCard).length;
+    
+    // Calculate total possible cards across all constraints
+    const totalPossible = playerConstraints.reduce((sum, c) => {
+      const possible = c.cards.filter(card => 
+        knowledgeMatrix[card]?.[playerName] !== 'NO'
+      );
+      return sum + possible.length;
+    }, 0);
+    
+    return {
+      constraintCount: playerConstraints.length,
+      unresolvedCount: unresolvedCount,
+      totalPossibleCards: totalPossible,
+      averagePossible: totalPossible / playerConstraints.length
+    };
+  };
+  
+  // GENERATE TURN-BY-TURN ANALYSIS REPORT
+  const generateReport = () => {
+    const myPlayerName = players[myPlayerIndex]?.name;
+    
+    return moves.map((move, idx) => {
+      const suggestedCards = [move.suggestion.suspect, move.suggestion.weapon, move.suggestion.room];
+      
+      // Analyze responses
+      const passed = [];
+      const showed = [];
+      
+      Object.entries(move.responses).forEach(([playerName, response]) => {
+        if (response === 'passed') {
+          passed.push(playerName);
+        } else if (response === 'showed') {
+          showed.push(playerName);
+        }
+      });
+      
+      // Find constraints created this turn
+      const turnConstraints = move.constraintsCreated || [];
+      
+      // Find insights generated this turn
+      const turnInsights = move.insightsGenerated || [];
+      
+      // Determine observer (who saw the card)
+      const observer = move.suggester;
+      const isIObserver = observer === myPlayerName;
+      
+      return {
+        turn: move.turn,
+        suggester: move.suggester,
+        cards: suggestedCards,
+        passed: passed,
+        showed: showed,
+        observer: observer,
+        isIObserver: isIObserver,
+        constraints: turnConstraints,
+        insights: turnInsights,
+        timestamp: move.timestamp
+      };
+    });
+  };
+  
+  // EXPORT REPORT AS TEXT
+  const exportReport = () => {
+    const report = generateReport();
+    const myPlayerName = players[myPlayerIndex]?.name;
+    
+    let text = '╔═══════════════════════════════════════════════════════════╗\n';
+    text += '║  BOARDBRAIN - TURN-BY-TURN ANALYSIS REPORT               ║\n';
+    text += '╚═══════════════════════════════════════════════════════════╝\n\n';
+    text += `Game Date: ${new Date().toLocaleDateString()}\n`;
+    text += `Playing as: ${myPlayerName} (${myCharacter})\n`;
+    text += `Players: ${players.map(p => p.name).join(', ')}\n\n`;
+    text += `My Cards: ${myCards.join(', ')}\n`;
+    text += `Public Cards: ${remainderCards.join(', ')}\n\n`;
+    text += '═══════════════════════════════════════════════════════════\n\n';
+    
+    report.forEach((turn, idx) => {
+      text += `┌${'─'.repeat(59)}┐\n`;
+      text += `│ TURN ${turn.turn}${' '.repeat(54 - turn.turn.toString().length)}│\n`;
+      text += `├${'─'.repeat(59)}┤\n`;
+      text += `│ MOVE:${' '.repeat(54)}│\n`;
+      text += `│ → ${turn.suggester} suggests:${' '.repeat(36 - turn.suggester.length)}│\n`;
+      text += `│   ${turn.cards.join(', ')}${' '.repeat(56 - turn.cards.join(', ').length)}│\n`;
+      text += `│${' '.repeat(60)}│\n`;
+      
+      text += `│ RESPONSES:${' '.repeat(49)}│\n`;
+      turn.passed.forEach(player => {
+        text += `│ → ${player}: PASSED${' '.repeat(47 - player.length)}│\n`;
+      });
+      turn.showed.forEach(player => {
+        text += `│ → ${player}: SHOWED${' '.repeat(47 - player.length)}│\n`;
+      });
+      text += `│${' '.repeat(60)}│\n`;
+      
+      text += `│ PUBLIC KNOWLEDGE (Everyone Learns):${' '.repeat(24)}│\n`;
+      turn.passed.forEach(player => {
+        text += `│ ✗ ${player} doesn't have: ${turn.cards.join(', ')}${' '.repeat(34 - player.length - turn.cards.join(', ').length)}│\n`;
+      });
+      turn.showed.forEach(player => {
+        text += `│ ⊕ ${player} has ONE OF: {${turn.cards.join(', ')}}${' '.repeat(29 - player.length - turn.cards.join(', ').length)}│\n`;
+      });
+      text += `│${' '.repeat(60)}│\n`;
+      
+      if (turn.showed.length > 0) {
+        text += `│ PRIVATE KNOWLEDGE:${' '.repeat(41)}│\n`;
+        if (turn.isIObserver) {
+          text += `│ → You (${turn.observer}) saw which card was shown${' '.repeat(30 - turn.observer.length)}│\n`;
+          text += `│   [Use "Reveal Card" to specify]${' '.repeat(27)}│\n`;
+        } else {
+          text += `│ → ${turn.observer} (observer) saw which card${' '.repeat(31 - turn.observer.length)}│\n`;
+          text += `│   [You don't know which card]${' '.repeat(30)}│\n`;
+        }
+        text += `│${' '.repeat(60)}│\n`;
+      }
+      
+      if (turn.constraints.length > 0) {
+        text += `│ CONSTRAINTS:${' '.repeat(47)}│\n`;
+        turn.constraints.forEach((constraint, cIdx) => {
+          text += `│ [NEW] Constraint #${constraints.indexOf(constraint) + 1}:${' '.repeat(36 - constraints.indexOf(constraint).toString().length)}│\n`;
+          text += `│   ${constraint.showedBy} has ONE OF {${constraint.cards.join(', ')}}${' '.repeat(36 - constraint.showedBy.length - constraint.cards.join(', ').length)}│\n`;
+          text += `│   Observed by: ${constraint.observedBy}${' '.repeat(43 - constraint.observedBy.length)}│\n`;
+          
+          const possibleCards = constraint.cards.filter(card => 
+            knowledgeMatrix[card]?.[constraint.showedBy] !== 'NO'
+          );
+          const status = constraint.revealedCard 
+            ? `RESOLVED → ${constraint.showedBy} has ${constraint.revealedCard}` 
+            : `UNRESOLVED (${possibleCards.length} options)`;
+          text += `│   Status: ${status}${' '.repeat(47 - status.length)}│\n`;
+        });
+        text += `│${' '.repeat(60)}│\n`;
+      }
+      
+      if (turn.insights.length > 0) {
+        text += `│ DEDUCTIONS:${' '.repeat(48)}│\n`;
+        turn.insights.forEach(insight => {
+          const msg = insight.message || '';
+          const lines = msg.match(/.{1,56}/g) || [msg];
+          lines.forEach((line, lineIdx) => {
+            if (lineIdx === 0) {
+              text += `│ → ${line}${' '.repeat(57 - line.length)}│\n`;
+            } else {
+              text += `│   ${line}${' '.repeat(57 - line.length)}│\n`;
+            }
+          });
+        });
+      } else {
+        text += `│ DEDUCTIONS:${' '.repeat(48)}│\n`;
+        text += `│ → None this turn${' '.repeat(43)}│\n`;
+      }
+      
+      text += `└${'─'.repeat(59)}┘\n\n`;
+    });
+    
+    // Create download
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `boardbrain-report-turn${currentTurn - 1}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // HELPER: Get constraint info for card-player combo (for visual display)
+  // Returns count of constraints and whether they're getting narrower
+  const getConstraintInfo_OLD = (card, playerName) => {
     // Find all constraints where this player showed and this card is involved
     const playerConstraints = constraints.filter(c => 
       c.showedBy === playerName && c.cards.includes(card)
@@ -1739,6 +1924,317 @@ export default function BoardBrain() {
                     ))
                   )}
                 </div>
+              </div>
+
+              {/* TURN-BY-TURN ANALYSIS REPORT */}
+              {showReport && (
+                <div style={{
+                  ...styles.card,
+                  marginBottom: '1rem',
+                  maxHeight: '600px',
+                  overflowY: 'auto',
+                  backgroundColor: '#0f172a',
+                  border: '2px solid #6366f1'
+                }}>
+                  <div style={{ 
+                    position: 'sticky', 
+                    top: 0, 
+                    backgroundColor: '#0f172a',
+                    paddingBottom: '1rem',
+                    borderBottom: '1px solid #334155',
+                    marginBottom: '1rem',
+                    zIndex: 10
+                  }}>
+                    <h3 style={{ 
+                      fontSize: '1.25rem', 
+                      fontWeight: '600',
+                      color: '#e2e8f0',
+                      marginBottom: '0.5rem'
+                    }}>
+                      📊 Turn-by-Turn Analysis Report
+                    </h3>
+                    <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      Detailed breakdown of every move and deduction
+                    </p>
+                  </div>
+
+                  {moves.length === 0 ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem', 
+                      color: '#64748b' 
+                    }}>
+                      No moves yet. Play some turns to see the analysis!
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                      {generateReport().map((turn, idx) => (
+                        <div 
+                          key={idx}
+                          style={{
+                            backgroundColor: '#1e293b',
+                            borderRadius: '0.5rem',
+                            padding: '1rem',
+                            border: '1px solid #334155'
+                          }}
+                        >
+                          {/* Turn Header */}
+                          <div style={{
+                            backgroundColor: '#6366f1',
+                            color: 'white',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '0.375rem',
+                            marginBottom: '1rem',
+                            fontWeight: '600',
+                            fontSize: '1rem'
+                          }}>
+                            TURN {turn.turn}
+                          </div>
+
+                          {/* Move Summary */}
+                          <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ 
+                              fontSize: '0.75rem', 
+                              color: '#94a3b8', 
+                              textTransform: 'uppercase',
+                              fontWeight: '600',
+                              marginBottom: '0.5rem'
+                            }}>
+                              Move:
+                            </div>
+                            <div style={{ color: '#e2e8f0', marginLeft: '1rem' }}>
+                              <div style={{ marginBottom: '0.25rem' }}>
+                                → <span style={{ color: '#8b5cf6', fontWeight: '600' }}>{turn.suggester}</span> suggests:
+                              </div>
+                              <div style={{ marginLeft: '1rem', color: '#cbd5e1' }}>
+                                {turn.cards.join(', ')}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Responses */}
+                          <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ 
+                              fontSize: '0.75rem', 
+                              color: '#94a3b8', 
+                              textTransform: 'uppercase',
+                              fontWeight: '600',
+                              marginBottom: '0.5rem'
+                            }}>
+                              Responses:
+                            </div>
+                            <div style={{ color: '#e2e8f0', marginLeft: '1rem' }}>
+                              {turn.passed.map(player => (
+                                <div key={player} style={{ marginBottom: '0.25rem' }}>
+                                  → <span style={{ color: '#10b981' }}>{player}</span>: <span style={{ color: '#ef4444' }}>PASSED</span>
+                                </div>
+                              ))}
+                              {turn.showed.map(player => (
+                                <div key={player} style={{ marginBottom: '0.25rem' }}>
+                                  → <span style={{ color: '#10b981' }}>{player}</span>: <span style={{ color: '#fbbf24' }}>SHOWED</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Public Knowledge */}
+                          <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ 
+                              fontSize: '0.75rem', 
+                              color: '#fbbf24', 
+                              textTransform: 'uppercase',
+                              fontWeight: '600',
+                              marginBottom: '0.5rem'
+                            }}>
+                              👁️ Public Knowledge (Everyone Learns):
+                            </div>
+                            <div style={{ marginLeft: '1rem' }}>
+                              {turn.passed.map(player => (
+                                <div key={player} style={{ 
+                                  marginBottom: '0.25rem',
+                                  fontSize: '0.875rem',
+                                  color: '#cbd5e1'
+                                }}>
+                                  ✗ <span style={{ color: '#10b981' }}>{player}</span> doesn't have: {turn.cards.join(', ')}
+                                </div>
+                              ))}
+                              {turn.showed.map(player => (
+                                <div key={player} style={{ 
+                                  marginBottom: '0.25rem',
+                                  fontSize: '0.875rem',
+                                  color: '#cbd5e1'
+                                }}>
+                                  ⊕ <span style={{ color: '#10b981' }}>{player}</span> has ONE OF: {'{'}{turn.cards.join(', ')}{'}'}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Private Knowledge */}
+                          {turn.showed.length > 0 && (
+                            <div style={{ marginBottom: '1rem' }}>
+                              <div style={{ 
+                                fontSize: '0.75rem', 
+                                color: '#8b5cf6', 
+                                textTransform: 'uppercase',
+                                fontWeight: '600',
+                                marginBottom: '0.5rem'
+                              }}>
+                                🔒 Private Knowledge:
+                              </div>
+                              <div style={{ marginLeft: '1rem', fontSize: '0.875rem' }}>
+                                {turn.isIObserver ? (
+                                  <div style={{ color: '#8b5cf6' }}>
+                                    → You ({turn.observer}) saw which card was shown
+                                    <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                                      [Use "Reveal Card" to specify]
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div style={{ color: '#cbd5e1' }}>
+                                    → <span style={{ color: '#10b981' }}>{turn.observer}</span> (observer) saw which card
+                                    <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                                      [You don't know which card]
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Constraints */}
+                          {turn.constraints.length > 0 && (
+                            <div style={{ marginBottom: '1rem' }}>
+                              <div style={{ 
+                                fontSize: '0.75rem', 
+                                color: '#ef4444', 
+                                textTransform: 'uppercase',
+                                fontWeight: '600',
+                                marginBottom: '0.5rem'
+                              }}>
+                                🔗 Constraints:
+                              </div>
+                              <div style={{ marginLeft: '1rem' }}>
+                                {turn.constraints.map((constraint, cIdx) => {
+                                  const possibleCards = constraint.cards.filter(card => 
+                                    knowledgeMatrix[card]?.[constraint.showedBy] !== 'NO'
+                                  );
+                                  const status = constraint.revealedCard 
+                                    ? `RESOLVED → ${constraint.showedBy} has ${constraint.revealedCard}` 
+                                    : `UNRESOLVED (${possibleCards.length} options)`;
+                                  
+                                  return (
+                                    <div 
+                                      key={cIdx}
+                                      style={{ 
+                                        marginBottom: '0.75rem',
+                                        backgroundColor: '#0f172a',
+                                        padding: '0.75rem',
+                                        borderRadius: '0.25rem',
+                                        border: '1px solid #334155'
+                                      }}
+                                    >
+                                      <div style={{ 
+                                        color: '#fbbf24', 
+                                        fontWeight: '600',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.875rem'
+                                      }}>
+                                        [NEW] Constraint #{constraints.indexOf(constraint) + 1}
+                                      </div>
+                                      <div style={{ fontSize: '0.875rem', color: '#cbd5e1', marginBottom: '0.25rem' }}>
+                                        <span style={{ color: '#10b981' }}>{constraint.showedBy}</span> has ONE OF {'{'}{constraint.cards.join(', ')}{'}'}
+                                      </div>
+                                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                                        Observed by: <span style={{ color: '#8b5cf6' }}>{constraint.observedBy}</span>
+                                      </div>
+                                      <div style={{ 
+                                        fontSize: '0.75rem', 
+                                        color: constraint.revealedCard ? '#10b981' : '#fbbf24',
+                                        fontWeight: '600'
+                                      }}>
+                                        Status: {status}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Deductions */}
+                          <div>
+                            <div style={{ 
+                              fontSize: '0.75rem', 
+                              color: '#10b981', 
+                              textTransform: 'uppercase',
+                              fontWeight: '600',
+                              marginBottom: '0.5rem'
+                            }}>
+                              🎯 Deductions:
+                            </div>
+                            <div style={{ marginLeft: '1rem' }}>
+                              {turn.insights.length > 0 ? (
+                                turn.insights.map((insight, iIdx) => (
+                                  <div 
+                                    key={iIdx}
+                                    style={{ 
+                                      marginBottom: '0.5rem',
+                                      padding: '0.5rem',
+                                      backgroundColor: insight.type === 'constraint_resolution' ? '#064e3b' :
+                                                      insight.type === 'intersection_deduction' ? '#7c2d12' :
+                                                      insight.type === 'backward_elimination' ? '#1e3a8a' :
+                                                      '#0f172a',
+                                      borderRadius: '0.25rem',
+                                      fontSize: '0.875rem',
+                                      color: '#e2e8f0',
+                                      border: '1px solid #334155'
+                                    }}
+                                  >
+                                    → {insight.message}
+                                  </div>
+                                ))
+                              ) : (
+                                <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                                  → None this turn
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Report Buttons */}
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                <button
+                  onClick={() => setShowReport(!showReport)}
+                  style={{
+                    ...styles.button,
+                    flex: 1,
+                    background: showReport ? '#8b5cf6' : '#6366f1',
+                    border: 'none'
+                  }}
+                >
+                  {showReport ? '📊 Hide Report' : '📊 View Report'}
+                </button>
+                <button
+                  onClick={exportReport}
+                  disabled={moves.length === 0}
+                  style={{
+                    ...styles.button,
+                    flex: 1,
+                    background: moves.length === 0 ? '#374151' : '#10b981',
+                    border: 'none',
+                    cursor: moves.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: moves.length === 0 ? 0.5 : 1
+                  }}
+                >
+                  💾 Export Report
+                </button>
               </div>
 
               {/* End Game */}

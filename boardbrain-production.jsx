@@ -799,12 +799,22 @@ export default function BoardBrain() {
       
       if (turn.showed.length > 0) {
         text += `│ PRIVATE KNOWLEDGE:${' '.repeat(41)}│\n`;
+        
+        const iShowedCard = turn.showed.includes(myPlayerName);
+        
         if (turn.isIObserver) {
+          // I was the observer
           text += `│ → You (${turn.observer}) saw which card was shown${' '.repeat(30 - turn.observer.length)}│\n`;
           text += `│   [Use "Reveal Card" to specify]${' '.repeat(27)}│\n`;
+        } else if (iShowedCard) {
+          // I showed the card
+          const showedTo = turn.observer;
+          text += `│ → You showed a card to ${showedTo}${' '.repeat(35 - showedTo.length)}│\n`;
+          text += `│   [You know which card you showed]${' '.repeat(25)}│\n`;
         } else {
+          // Someone else involved
           text += `│ → ${turn.observer} (observer) saw which card${' '.repeat(31 - turn.observer.length)}│\n`;
-          text += `│   [You don't know which card]${' '.repeat(30)}│\n`;
+          text += `│   [Only ${turn.observer} and the player who showed know]${' '.repeat(36 - turn.observer.length)}│\n`;
         }
         text += `│${' '.repeat(60)}│\n`;
       }
@@ -1774,38 +1784,74 @@ export default function BoardBrain() {
                   {moveInput.suggester && (
                     <div key={`${moveInput.suspect}-${moveInput.weapon}-${moveInput.room}`}>
                       <label style={styles.label}>Player Responses</label>
-                      {players.filter(p => p.name !== moveInput.suggester).map(p => {
-                        // Check if this player is YOU and if you have any of the suggested cards
-                        const isHost = p.name === players[myPlayerIndex]?.name;
-                        const suggestedCards = [moveInput.suspect, moveInput.weapon, moveInput.room].filter(c => c);
-                        const hostHasCard = isHost && suggestedCards.length === 3 && suggestedCards.some(card => myCards.includes(card));
+                      {(() => {
+                        // Calculate response order
+                        const suggesterIndex = players.findIndex(p => p.name === moveInput.suggester);
+                        const responseOrder = [
+                          ...players.slice(suggesterIndex + 1),
+                          ...players.slice(0, suggesterIndex)
+                        ];
                         
-                        return (
-                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
-                              {p.name}{isHost ? ' (YOU)' : ''}
-                            </span>
-                            <select
-                              style={{ ...styles.select, width: 'auto', fontSize: '0.75rem', padding: '0.25rem' }}
-                              value={moveInput.responses[p.name] || ''}
-                              onChange={(e) => setMoveInput({
-                                ...moveInput,
-                                responses: {...moveInput.responses, [p.name]: e.target.value}
-                              })}
-                            >
-                              <option value="">Select</option>
-                              {/* Only show "Passed" if host doesn't have the card */}
-                              {!hostHasCard && <option value="passed">Passed</option>}
-                              <option value="showed">Showed Card</option>
-                            </select>
-                            {hostHasCard && (
-                              <span style={{ fontSize: '0.65rem', color: '#fbbf24', marginLeft: '0.5rem' }}>
-                                Must show!
+                        // Track which players can respond
+                        let canRespond = true;
+                        
+                        return responseOrder.map(p => {
+                          // Check if this player is YOU and if you have any of the suggested cards
+                          const isHost = p.name === players[myPlayerIndex]?.name;
+                          const suggestedCards = [moveInput.suspect, moveInput.weapon, moveInput.room].filter(c => c);
+                          const hostHasCard = isHost && suggestedCards.length === 3 && suggestedCards.some(card => myCards.includes(card));
+                          
+                          // Determine if this player's dropdown should be enabled
+                          const playerCanRespond = canRespond;
+                          const playerResponse = moveInput.responses[p.name];
+                          
+                          // Update canRespond for next player
+                          if (playerResponse === 'showed') {
+                            canRespond = false; // Turn ends, no more responses needed
+                          } else if (playerResponse === 'passed') {
+                            canRespond = true; // Continue to next player
+                          } else if (playerCanRespond) {
+                            canRespond = false; // This player needs to respond before others
+                          }
+                          
+                          return (
+                            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                              <span style={{ 
+                                fontSize: '0.75rem', 
+                                color: playerCanRespond ? '#cbd5e1' : '#64748b' 
+                              }}>
+                                {p.name}{isHost ? ' (YOU)' : ''}
                               </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                              <select
+                                style={{ 
+                                  ...styles.select, 
+                                  width: 'auto', 
+                                  fontSize: '0.75rem', 
+                                  padding: '0.25rem',
+                                  opacity: playerCanRespond ? 1 : 0.5,
+                                  cursor: playerCanRespond ? 'pointer' : 'not-allowed'
+                                }}
+                                value={moveInput.responses[p.name] || ''}
+                                disabled={!playerCanRespond}
+                                onChange={(e) => setMoveInput({
+                                  ...moveInput,
+                                  responses: {...moveInput.responses, [p.name]: e.target.value}
+                                })}
+                              >
+                                <option value="">Select</option>
+                                {/* Only show "Passed" if host doesn't have the card */}
+                                {!hostHasCard && <option value="passed">Passed</option>}
+                                <option value="showed">Showed Card</option>
+                              </select>
+                              {hostHasCard && playerCanRespond && (
+                                <span style={{ fontSize: '0.65rem', color: '#fbbf24', marginLeft: '0.5rem' }}>
+                                  Must show!
+                                </span>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   )}
 
@@ -2242,36 +2288,51 @@ export default function BoardBrain() {
                           </div>
 
                           {/* Private Knowledge */}
-                          {turn.showed.length > 0 && (
-                            <div style={{ marginBottom: '1rem' }}>
-                              <div style={{ 
-                                fontSize: '0.75rem', 
-                                color: '#8b5cf6', 
-                                textTransform: 'uppercase',
-                                fontWeight: '600',
-                                marginBottom: '0.5rem'
-                              }}>
-                                🔒 Private Knowledge:
-                              </div>
-                              <div style={{ marginLeft: '1rem', fontSize: '0.875rem' }}>
-                                {turn.isIObserver ? (
-                                  <div style={{ color: '#8b5cf6' }}>
-                                    → You ({turn.observer}) saw which card was shown
-                                    <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
-                                      [Use "Reveal Card" to specify]
+                          {turn.showed.length > 0 && (() => {
+                            const myPlayerName = players[myPlayerIndex]?.name;
+                            const iShowedCard = turn.showed.includes(myPlayerName);
+                            
+                            return (
+                              <div style={{ marginBottom: '1rem' }}>
+                                <div style={{ 
+                                  fontSize: '0.75rem', 
+                                  color: '#8b5cf6', 
+                                  textTransform: 'uppercase',
+                                  fontWeight: '600',
+                                  marginBottom: '0.5rem'
+                                }}>
+                                  🔒 Private Knowledge:
+                                </div>
+                                <div style={{ marginLeft: '1rem', fontSize: '0.875rem' }}>
+                                  {turn.isIObserver ? (
+                                    // I was the observer
+                                    <div style={{ color: '#8b5cf6' }}>
+                                      → You ({turn.observer}) saw which card was shown
+                                      <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                                        [Use "Reveal Card" to specify]
+                                      </div>
                                     </div>
-                                  </div>
-                                ) : (
-                                  <div style={{ color: '#cbd5e1' }}>
-                                    → <span style={{ color: '#10b981' }}>{turn.observer}</span> (observer) saw which card
-                                    <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
-                                      [You don't know which card]
+                                  ) : iShowedCard ? (
+                                    // I showed the card
+                                    <div style={{ color: '#8b5cf6' }}>
+                                      → You showed a card to <span style={{ color: '#10b981' }}>{turn.observer}</span>
+                                      <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                                        [You know which card you showed]
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
+                                  ) : (
+                                    // Someone else involved
+                                    <div style={{ color: '#cbd5e1' }}>
+                                      → <span style={{ color: '#10b981' }}>{turn.observer}</span> (observer) saw which card
+                                      <div style={{ marginLeft: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                                        [Only {turn.observer} and the player who showed know]
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* Constraints */}
                           {turn.constraints.length > 0 && (

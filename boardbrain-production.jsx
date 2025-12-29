@@ -715,8 +715,21 @@ export default function BoardBrain() {
   const getCellState = (card, playerName) => {
     const myPlayerName = players[myPlayerIndex]?.name;
     
-    // MY CARD (Purple)
-    if (myCards.includes(card)) {
+    // PUBLIC/REMAINDER CARD (Green X for all players)
+    if (remainderCards.includes(card)) {
+      return {
+        type: 'PUBLIC',
+        color: '#22c55e',
+        intensity: 0.5,
+        overlay: '✗',
+        border: '#22c55e',
+        borderWidth: 2,
+        tooltip: 'Public card (set aside)'
+      };
+    }
+    
+    // MY CARD (Purple) - ONLY in MY column!
+    if (myCards.includes(card) && playerName === myPlayerName) {
       return {
         type: 'MY_CARD',
         color: '#8b5cf6',
@@ -759,7 +772,7 @@ export default function BoardBrain() {
         overlay: '✗',
         border: '#22c55e',
         borderWidth: 2,
-        tooltip: 'Doesn\'t have this card'
+        tooltip: 'Public card (eliminated)'
       };
     }
     
@@ -1701,7 +1714,7 @@ export default function BoardBrain() {
                     border: '2px solid #22c55e',
                     marginRight: '4px',
                     verticalAlign: 'middle'
-                  }}></span> Green = Doesn't have</div>
+                  }}></span> Green = Public Cards</div>
                   <div><span style={{ 
                     display: 'inline-block', 
                     width: '16px', 
@@ -1747,17 +1760,17 @@ export default function BoardBrain() {
                     {/* Player columns */}
                     {players.map((p, idx) => (
                       <div key={p.name} style={{ 
-                        width: '80px',
-                        minWidth: '80px',
+                        width: '65px',
+                        minWidth: '65px',
                         padding: '0.25rem',
                         textAlign: 'center',
                         fontWeight: '600',
                         color: '#cbd5e1'
                       }}>
-                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '0.15rem' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginBottom: '0.1rem' }}>
                           Player {idx + 1}
                         </div>
-                        <div style={{ fontSize: '0.85rem' }}>
+                        <div style={{ fontSize: '0.8rem' }}>
                           {p.name}
                         </div>
                       </div>
@@ -1765,8 +1778,8 @@ export default function BoardBrain() {
                     
                     {/* Solution column */}
                     <div style={{ 
-                      width: '80px',
-                      minWidth: '80px',
+                      width: '65px',
+                      minWidth: '65px',
                       padding: '0.5rem',
                       textAlign: 'center',
                       fontWeight: '600',
@@ -1824,15 +1837,15 @@ export default function BoardBrain() {
                                 key={p.name}
                                 title={cellState.tooltip}
                                 style={{
-                                  width: '80px',
-                                  minWidth: '80px',
-                                  height: '50px',
+                                  width: '65px',
+                                  minWidth: '65px',
+                                  height: '40px',
                                   backgroundColor: rgbaColor,
                                   border: `${cellState.borderWidth}px solid ${cellState.border}`,
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  fontSize: '1.25rem',
+                                  fontSize: '1.1rem',
                                   fontWeight: '600',
                                   color: '#ffffff',
                                   cursor: 'default',
@@ -1869,15 +1882,15 @@ export default function BoardBrain() {
                             return (
                               <div
                                 style={{
-                                  width: '80px',
-                                  minWidth: '80px',
-                                  height: '50px',
+                                  width: '65px',
+                                  minWidth: '65px',
+                                  height: '40px',
                                   backgroundColor: cellColor,
                                   border: `2px solid ${cellBorder}`,
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  fontSize: '1.25rem',
+                                  fontSize: '1.1rem',
                                   fontWeight: '600',
                                   color: '#ffffff',
                                   cursor: 'default',

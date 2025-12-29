@@ -64,6 +64,10 @@ export default function BoardBrain() {
   
   // Host Mode (shows all player perspectives + GLOBAL view)
   const [hostMode, setHostMode] = useState(false);
+  
+  // Multi-player knowledge tracking - each player has their own perspective
+  const [playerKnowledge, setPlayerKnowledge] = useState({});
+  // Structure: { playerName: { myCards: [], knowledgeMatrix: {}, constraints: [] } }
 
   // Calculate cards per player and remainder
   const cardsPerPlayer = numPlayers ? Math.floor(18 / numPlayers) : 0;
@@ -73,6 +77,7 @@ export default function BoardBrain() {
   useEffect(() => {
     if (gamePhase === 'playing' && Object.keys(knowledgeMatrix).length === 0) {
       initializeKnowledgeMatrix();
+      initializePlayerKnowledge();
     }
   }, [gamePhase]);
   
@@ -88,6 +93,42 @@ export default function BoardBrain() {
       });
     }
   }, [gamePhase]);
+
+  const initializePlayerKnowledge = () => {
+    const allPlayerKnowledge = {};
+    
+    players.forEach((player, playerIdx) => {
+      // Initialize each player's knowledge matrix
+      const playerMatrix = {};
+      
+      ALL_CARDS.forEach(card => {
+        playerMatrix[card] = {
+          solution: '?',
+          ...Object.fromEntries(players.map(p => [p.name, '?']))
+        };
+        
+        // Each player knows their own cards
+        if (playerIdx === myPlayerIndex && myCards.includes(card)) {
+          playerMatrix[card][player.name] = 'HAS';
+          playerMatrix[card].solution = 'NO';
+        }
+        
+        // Everyone knows remainder cards
+        if (remainderCards.includes(card)) {
+          players.forEach(p => playerMatrix[card][p.name] = 'NO');
+          playerMatrix[card].solution = 'NO';
+        }
+      });
+      
+      allPlayerKnowledge[player.name] = {
+        myCards: playerIdx === myPlayerIndex ? [...myCards] : [],
+        knowledgeMatrix: playerMatrix,
+        constraints: []
+      };
+    });
+    
+    setPlayerKnowledge(allPlayerKnowledge);
+  };
 
   const initializeKnowledgeMatrix = () => {
     const matrix = {};
@@ -256,6 +297,140 @@ export default function BoardBrain() {
     if (myCards.length === cardsPerPlayer && remainderCards.length === remainderCount && myCharacter) {
       setGamePhase('playing');
     }
+  };
+
+  // UPDATE ALL PLAYER KNOWLEDGE when a move is logged
+  const updateAllPlayerKnowledge = (move, responses, globalMatrix, globalConstraints) => {
+    const newPlayerKnowledge = { ...playerKnowledge };
+    const suggestedCards = [move.suggestion.suspect, move.suggestion.weapon, move.suggestion.room];
+    
+    // Find who showed (if anyone)
+    let showedPlayer = null;
+    Object.entries(responses).forEach(([playerName, response]) => {
+      if (response === 'showed') {
+        showedPlayer = playerName;
+      }
+    });
+    
+    // Update each player's knowledge
+    players.forEach((player) => {
+      if (!newPlayerKnowledge[player.name]) return;
+      
+      const playerMatrix = { ...newPlayerKnowledge[player.name].knowledgeMatrix };
+      const playerConstraints = [...newPlayerKnowledge[player.name].constraints];
+      
+      // PUBLIC KNOWLEDGE: Process passes (everyone learns these)
+      Object.entries(responses).forEach(([responderName, response]) => {
+        if (response === 'passed') {
+          // This player passed - doesn't have any of the 3 cards
+          suggestedCards.forEach(card => {
+            if (!playerMatrix[card]) {
+              playerMatrix[card] = {
+                solution: '?',
+                ...Object.fromEntries(players.map(p => [p.name, '?']))
+              };
+            }
+            playerMatrix[card][responderName] = 'NO';
+          });
+        }
+      });
+      
+      // PUBLIC KNOWLEDGE: If someone showed, create constraint
+      if (showedPlayer) {
+        // Everyone knows a constraint was created
+        const existingConstraint = playerConstraints.find(c =>
+          c.turn === move.turn &&
+          c.showedBy === showedPlayer
+        );
+        
+        if (!existingConstraint) {
+          playerConstraints.push({
+            turn: move.turn,
+            suggester: move.suggestion.player,
+            cards: suggestedCards,
+            showedBy: showedPlayer,
+            observedBy: move.suggestion.player, // Observer is the suggester
+            revealedCard: null,
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+        // IMMEDIATE RESOLUTION CHECK (everyone can do this)
+        const possibleCards = suggestedCards.filter(card =>
+          playerMatrix[card] && playerMatrix[card][showedPlayer] !== 'NO'
+        );
+        
+        if (possibleCards.length === 1) {
+          const deducedCard = possibleCards[0];
+          if (!playerMatrix[deducedCard]) {
+            playerMatrix[deducedCard] = {
+              solution: '?',
+              ...Object.fromEntries(players.map(p => [p.name, '?']))
+            };
+          }
+          playerMatrix[deducedCard][showedPlayer] = 'HAS';
+          playerMatrix[deducedCard].solution = 'NO';
+          
+          // Backward eliminate
+          suggestedCards.forEach(card => {
+            if (card !== deducedCard) {
+              if (!playerMatrix[card]) {
+                playerMatrix[card] = {
+                  solution: '?',
+                  ...Object.fromEntries(players.map(p => [p.name, '?']))
+                };
+              }
+              if (playerMatrix[card][showedPlayer] !== 'NO') {
+                playerMatrix[card][showedPlayer] = 'NO';
+              }
+            }
+          });
+        }
+      }
+      
+      // Apply SIMPLE constraint propagation (one pass)
+      playerConstraints.forEach((constraint) => {
+        const constraintPlayer = constraint.showedBy;
+        const possibleCards = constraint.cards.filter(card =>
+          playerMatrix[card] && playerMatrix[card][constraintPlayer] !== 'NO'
+        );
+        
+        if (possibleCards.length === 1) {
+          const deducedCard = possibleCards[0];
+          if (!playerMatrix[deducedCard]) {
+            playerMatrix[deducedCard] = {
+              solution: '?',
+              ...Object.fromEntries(players.map(p => [p.name, '?']))
+            };
+          }
+          if (playerMatrix[deducedCard][constraintPlayer] !== 'HAS') {
+            playerMatrix[deducedCard][constraintPlayer] = 'HAS';
+            playerMatrix[deducedCard].solution = 'NO';
+            
+            // Backward eliminate
+            constraint.cards.forEach(card => {
+              if (card !== deducedCard) {
+                if (!playerMatrix[card]) {
+                  playerMatrix[card] = {
+                    solution: '?',
+                    ...Object.fromEntries(players.map(p => [p.name, '?']))
+                  };
+                }
+                if (playerMatrix[card][constraintPlayer] !== 'NO') {
+                  playerMatrix[card][constraintPlayer] = 'NO';
+                }
+              }
+            });
+          }
+        }
+      });
+      
+      // Update this player's knowledge
+      newPlayerKnowledge[player.name].knowledgeMatrix = playerMatrix;
+      newPlayerKnowledge[player.name].constraints = playerConstraints;
+    });
+    
+    setPlayerKnowledge(newPlayerKnowledge);
   };
 
   const logMove = () => {
@@ -590,6 +765,10 @@ export default function BoardBrain() {
     setConstraints(newConstraints);
     setKnowledgeMatrix(newMatrix);
     calculateProbabilities(newMatrix, newConstraints, newFrequency);
+    
+    // UPDATE PER-PLAYER KNOWLEDGE (for Host Mode multi-perspective view)
+    updateAllPlayerKnowledge(newMove, responses, newMatrix, newConstraints);
+    
     setCurrentTurn(currentTurn + 1);
     
     // ADVANCE TO NEXT PLAYER'S TURN
@@ -828,13 +1007,28 @@ export default function BoardBrain() {
   };
   
   // HOST MODE: Get cell state from a SPECIFIC player's perspective
+  // HOST MODE: Get cell state from a SPECIFIC player's perspective
   const getCellStateForPlayer = (card, columnPlayerName, viewingPlayerIndex) => {
     const viewingPlayerName = players[viewingPlayerIndex]?.name;
     
-    // Get the cards this viewing player holds
-    const viewingPlayerCards = viewingPlayerIndex === myPlayerIndex 
-      ? myCards 
-      : []; // In real multiplayer, we'd get their actual cards
+    // Get this player's knowledge from playerKnowledge state
+    const viewingPlayerData = playerKnowledge[viewingPlayerName];
+    if (!viewingPlayerData) {
+      // Fallback to unknown if no data
+      return {
+        type: 'UNKNOWN',
+        color: '#64748b',
+        intensity: 0.2,
+        overlay: '?',
+        border: '#64748b',
+        borderWidth: 1,
+        tooltip: 'No data'
+      };
+    }
+    
+    const viewingPlayerCards = viewingPlayerData.myCards || [];
+    const viewingPlayerMatrix = viewingPlayerData.knowledgeMatrix || {};
+    const viewingPlayerConstraints = viewingPlayerData.constraints || [];
     
     // PUBLIC/REMAINDER CARD (Green X for all players)
     if (remainderCards.includes(card)) {
@@ -862,12 +1056,12 @@ export default function BoardBrain() {
       };
     }
     
-    const matrixValue = knowledgeMatrix[card]?.[columnPlayerName];
+    const matrixValue = viewingPlayerMatrix[card]?.[columnPlayerName];
     
     // CONFIRMED HAS (Blue)
     if (matrixValue === 'HAS') {
       // Check if viewing player observed this
-      const privateConstraint = constraints.find(c => 
+      const privateConstraint = viewingPlayerConstraints.find(c => 
         c.showedBy === columnPlayerName && 
         c.observedBy === viewingPlayerName && 
         c.revealedCard === card
@@ -897,8 +1091,8 @@ export default function BoardBrain() {
       };
     }
     
-    // Check for CONSTRAINTS
-    const playerConstraints = constraints.filter(c => 
+    // Check for CONSTRAINTS (from this player's perspective)
+    const playerConstraints = viewingPlayerConstraints.filter(c => 
       c.showedBy === columnPlayerName && 
       c.cards.includes(card) &&
       !c.revealedCard
@@ -907,7 +1101,7 @@ export default function BoardBrain() {
     if (playerConstraints.length > 0) {
       const totalPossible = playerConstraints.reduce((sum, c) => {
         const possible = c.cards.filter(card => 
-          knowledgeMatrix[card]?.[columnPlayerName] !== 'NO'
+          viewingPlayerMatrix[card]?.[columnPlayerName] !== 'NO'
         );
         return sum + possible.length;
       }, 0);
@@ -1859,10 +2053,10 @@ export default function BoardBrain() {
                             <div key={card} style={{ display: 'flex', marginBottom: '1px' }}>
                               {/* Card name */}
                               <div style={{
-                                width: '90px',
-                                fontSize: '0.65rem',
+                                width: '70px',
+                                fontSize: '0.6rem',
                                 color: '#cbd5e1',
-                                padding: '2px 4px',
+                                padding: '2px 3px',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap'
@@ -1880,14 +2074,14 @@ export default function BoardBrain() {
                                     key={p.name}
                                     title={cellState.tooltip}
                                     style={{
-                                      width: '28px',
-                                      height: '20px',
+                                      width: '22px',
+                                      height: '18px',
                                       backgroundColor: rgbaColor,
                                       border: `${cellState.borderWidth}px solid ${cellState.border}`,
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'center',
-                                      fontSize: '0.7rem',
+                                      fontSize: '0.65rem',
                                       fontWeight: '600',
                                       color: '#ffffff',
                                       boxSizing: 'border-box'

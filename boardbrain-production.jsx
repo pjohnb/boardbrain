@@ -29,6 +29,15 @@ export default function BoardBrain() {
   const [myCards, setMyCards] = useState([]);
   const [remainderCards, setRemainderCards] = useState([]);
   
+  // Host Mode: Track ALL players' actual cards for GLOBAL view
+  const [allPlayersCards, setAllPlayersCards] = useState({});
+  // Structure: { "Ann": [...cards], "Lisa": [...cards], etc }
+  
+  // Host Mode Setup: Enable entering all players' cards
+  const [hostSetupMode, setHostSetupMode] = useState(false);
+  const [hostModeCards, setHostModeCards] = useState({});
+  // Structure during setup: { "Ann": [...cards], "Lisa": [...cards], etc }
+  
   // Game state
   const [currentTurn, setCurrentTurn] = useState(1);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0); // Whose turn is it
@@ -97,9 +106,17 @@ export default function BoardBrain() {
   const initializePlayerKnowledge = () => {
     const allPlayerKnowledge = {};
     
+    // Use existing allPlayersCards if set (from host mode setup)
+    // Otherwise initialize empty for single-player mode
+    const cardsToUse = Object.keys(allPlayersCards).length > 0 ? allPlayersCards : {};
+    
     players.forEach((player, playerIdx) => {
       // Initialize each player's knowledge matrix
       const playerMatrix = {};
+      
+      // Get this player's actual cards
+      const playerActualCards = cardsToUse[player.name] || 
+                                (playerIdx === myPlayerIndex ? myCards : []);
       
       ALL_CARDS.forEach(card => {
         playerMatrix[card] = {
@@ -108,7 +125,7 @@ export default function BoardBrain() {
         };
         
         // Each player knows their own cards
-        if (playerIdx === myPlayerIndex && myCards.includes(card)) {
+        if (playerActualCards.includes(card)) {
           playerMatrix[card][player.name] = 'HAS';
           playerMatrix[card].solution = 'NO';
         }
@@ -121,13 +138,22 @@ export default function BoardBrain() {
       });
       
       allPlayerKnowledge[player.name] = {
-        myCards: playerIdx === myPlayerIndex ? [...myCards] : [],
+        myCards: playerActualCards,
         knowledgeMatrix: playerMatrix,
         constraints: []
       };
     });
     
     setPlayerKnowledge(allPlayerKnowledge);
+    
+    // If allPlayersCards wasn't set, set it now with what we know
+    if (Object.keys(allPlayersCards).length === 0) {
+      const allCards = {};
+      players.forEach((player, playerIdx) => {
+        allCards[player.name] = playerIdx === myPlayerIndex ? [...myCards] : [];
+      });
+      setAllPlayersCards(allCards);
+    }
   };
 
   const initializeKnowledgeMatrix = () => {
@@ -1659,11 +1685,42 @@ export default function BoardBrain() {
           </div>
 
           <div style={styles.card}>
-            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Game Setup - Step 3: Your Cards</h2>
-            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
-              Playing as: <strong style={{ color: '#60a5fa' }}>{players[myPlayerIndex]?.name}</strong> ({myCharacter})
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <div>
+                <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Game Setup - Step 3: Cards</h2>
+                <p style={{ fontSize: '0.875rem', color: '#94a3b8' }}>
+                  {hostSetupMode ? 
+                    'Host Mode: Enter all players\' cards to see complete GLOBAL view' :
+                    `Playing as: ${players[myPlayerIndex]?.name} (${myCharacter})`
+                  }
+                </p>
+              </div>
+              
+              <button
+                onClick={() => {
+                  setHostSetupMode(!hostSetupMode);
+                  if (!hostSetupMode) {
+                    // Initialize host mode cards
+                    const initCards = {};
+                    players.forEach(p => initCards[p.name] = []);
+                    setHostModeCards(initCards);
+                  }
+                }}
+                style={{
+                  ...styles.button,
+                  background: hostSetupMode ? '#10b981' : '#6366f1',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.875rem'
+                }}
+              >
+                {hostSetupMode ? '🖥️ HOST MODE' : '👤 Single Player'}
+              </button>
+            </div>
             
+            {/* CONDITIONAL: Host Mode vs Single Player Card Selection */}
+            {!hostSetupMode ? (
+              /* SINGLE PLAYER MODE: Select only your cards */
+              <div>
             {/* My Cards */}
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={styles.label}>
@@ -1841,6 +1898,129 @@ export default function BoardBrain() {
                 </p>
               </div>
             )}
+            </div>
+            ) : (
+              /* HOST MODE: Enter ALL players' cards */
+              <div style={{ marginBottom: '1.5rem' }}>
+                {players.map((player, playerIdx) => {
+                  const playerCards = hostModeCards[player.name] || [];
+                  const playerCardCount = playerIdx === myPlayerIndex ? cardsPerPlayer : Math.floor(18 / players.length);
+                  
+                  return (
+                    <div key={player.name} style={{
+                      marginBottom: '1.5rem',
+                      padding: '1rem',
+                      backgroundColor: '#0f172a',
+                      borderRadius: '0.375rem',
+                      border: '2px solid #8b5cf6'
+                    }}>
+                      <h3 style={{ 
+                        fontSize: '1rem', 
+                        fontWeight: '600',
+                        color: '#8b5cf6',
+                        marginBottom: '0.75rem'
+                      }}>
+                        P{playerIdx + 1} {player.name} - Select {playerCardCount} cards
+                        {playerCards.length === playerCardCount && ' ✅'}
+                      </h3>
+                      
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                        Selected: {playerCards.length}/{playerCardCount}
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                        {ALL_CARDS.map(card => {
+                          const isSelected = playerCards.includes(card);
+                          const usedByOther = Object.entries(hostModeCards).some(([name, cards]) => 
+                            name !== player.name && cards.includes(card)
+                          );
+                          const isDisabled = (usedByOther || (!isSelected && playerCards.length >= playerCardCount));
+                          
+                          return (
+                            <label
+                              key={card}
+                              style={{
+                                ...styles.checkboxLabel,
+                                color: usedByOther ? '#64748b' : (isDisabled ? '#94a3b8' : '#e2e8f0'),
+                                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                opacity: usedByOther ? 0.5 : 1
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                style={{
+                                  ...styles.checkbox,
+                                  cursor: isDisabled ? 'not-allowed' : 'pointer'
+                                }}
+                                checked={isSelected}
+                                disabled={isDisabled}
+                                onChange={() => {
+                                  const newCards = { ...hostModeCards };
+                                  if (isSelected) {
+                                    newCards[player.name] = playerCards.filter(c => c !== card);
+                                  } else {
+                                    newCards[player.name] = [...playerCards, card];
+                                  }
+                                  setHostModeCards(newCards);
+                                }}
+                              />
+                              <span>{card}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                {/* Remainder Cards in Host Mode */}
+                {remainderCount > 0 && (() => {
+                  const allAssignedCards = Object.values(hostModeCards).flat();
+                  const remainderCardsHost = ALL_CARDS.filter(c => !allAssignedCards.includes(c));
+                  
+                  return (
+                    <div style={{
+                      padding: '1rem',
+                      backgroundColor: '#0f172a',
+                      borderRadius: '0.375rem',
+                      border: '2px solid #fbbf24'
+                    }}>
+                      <h3 style={{ 
+                        fontSize: '1rem', 
+                        fontWeight: '600',
+                        color: '#fbbf24',
+                        marginBottom: '0.75rem'
+                      }}>
+                        Public/Remainder Cards ({remainderCardsHost.length}/{remainderCount})
+                        {remainderCardsHost.length === remainderCount && ' ✅'}
+                      </h3>
+                      
+                      <div style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
+                        {remainderCardsHost.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {remainderCardsHost.map(card => (
+                              <span key={card} style={{
+                                padding: '0.25rem 0.5rem',
+                                backgroundColor: '#fbbf24',
+                                color: '#0f172a',
+                                borderRadius: '0.25rem',
+                                fontSize: '0.75rem'
+                              }}>
+                                {card}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#64748b', fontStyle: 'italic' }}>
+                            All cards assigned to players
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Start/Back Buttons */}
             <div style={{ display: 'flex', gap: '1rem' }}>
@@ -1856,16 +2036,46 @@ export default function BoardBrain() {
                 ← Back
               </button>
               <button
-                onClick={() => setGamePhase('playing')}
+                onClick={() => {
+                  if (hostSetupMode) {
+                    // Host mode: Set all players' cards and remainder
+                    const allAssignedCards = Object.values(hostModeCards).flat();
+                    const remainder = ALL_CARDS.filter(c => !allAssignedCards.includes(c));
+                    
+                    setAllPlayersCards(hostModeCards);
+                    setMyCards(hostModeCards[players[myPlayerIndex].name] || []);
+                    setRemainderCards(remainder);
+                    setHostMode(true); // Auto-enable host mode for viewing
+                  }
+                  setGamePhase('playing');
+                }}
                 disabled={
-                  myCards.length !== cardsPerPlayer ||
-                  (remainderCount > 0 && remainderCards.length !== remainderCount)
+                  hostSetupMode ? 
+                    (() => {
+                      const allPlayersFilled = players.every((p, idx) => {
+                        const expected = Math.floor(18 / players.length);
+                        return (hostModeCards[p.name] || []).length === expected;
+                      });
+                      const totalCards = Object.values(hostModeCards).flat().length;
+                      return !allPlayersFilled || totalCards !== (18 - remainderCount);
+                    })() :
+                    (myCards.length !== cardsPerPlayer ||
+                     (remainderCount > 0 && remainderCards.length !== remainderCount))
                 }
                 style={{
                   ...styles.button,
                   flex: 2,
-                  ...((myCards.length !== cardsPerPlayer ||
-                      (remainderCount > 0 && remainderCards.length !== remainderCount)) && styles.buttonDisabled)
+                  ...(hostSetupMode ? 
+                      (() => {
+                        const allPlayersFilled = players.every((p, idx) => {
+                          const expected = Math.floor(18 / players.length);
+                          return (hostModeCards[p.name] || []).length === expected;
+                        });
+                        const totalCards = Object.values(hostModeCards).flat().length;
+                        return (!allPlayersFilled || totalCards !== (18 - remainderCount)) && styles.buttonDisabled;
+                      })() :
+                      ((myCards.length !== cardsPerPlayer ||
+                        (remainderCount > 0 && remainderCards.length !== remainderCount)) && styles.buttonDisabled))
                 }}
               >
                 Start Playing →
@@ -2190,8 +2400,8 @@ export default function BoardBrain() {
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
                   {players.map((player, playerIdx) => {
-                    // Get actual cards for this player (only host knows all)
-                    const playerCards = playerIdx === myPlayerIndex ? myCards : [];
+                    // Get actual cards for this player from allPlayersCards
+                    const playerCards = allPlayersCards[player.name] || [];
                     
                     return (
                       <div key={player.name} style={{
@@ -2206,7 +2416,7 @@ export default function BoardBrain() {
                           color: '#8b5cf6',
                           marginBottom: '0.5rem'
                         }}>
-                          {player.name}
+                          P{playerIdx + 1} {player.name}
                         </div>
                         <div style={{ fontSize: '0.7rem', color: '#cbd5e1' }}>
                           {playerCards.length > 0 ? (
@@ -2217,7 +2427,7 @@ export default function BoardBrain() {
                             ))
                           ) : (
                             <div style={{ color: '#64748b', fontStyle: 'italic' }}>
-                              (Cards unknown - not viewing player)
+                              (Set cards in Host Mode setup)
                             </div>
                           )}
                         </div>
@@ -2250,6 +2460,117 @@ export default function BoardBrain() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+              
+              {/* HOST MODE: Move History & Card Reveal Panels */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                {/* Move History */}
+                <div style={{
+                  ...styles.card,
+                  padding: '1rem',
+                  backgroundColor: '#1e293b',
+                  maxHeight: '400px',
+                  overflowY: 'auto'
+                }}>
+                  <h3 style={{ marginBottom: '1rem', fontSize: '1rem', color: '#e2e8f0' }}>
+                    📜 Move History ({moves.length} moves)
+                  </h3>
+                  {moves.length === 0 ? (
+                    <div style={{ color: '#64748b', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                      No moves yet
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.75rem' }}>
+                      {[...moves].reverse().map((move, idx) => {
+                        const actualIdx = moves.length - 1 - idx;
+                        return (
+                          <div key={actualIdx} style={{
+                            marginBottom: '0.75rem',
+                            padding: '0.5rem',
+                            backgroundColor: '#0f172a',
+                            borderRadius: '0.25rem',
+                            borderLeft: '3px solid #6366f1'
+                          }}>
+                            <div style={{ color: '#cbd5e1', fontWeight: '600', marginBottom: '0.25rem' }}>
+                              Turn {move.turn}: {move.suggestion.player}
+                            </div>
+                            <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                              {move.suggestion.suspect}, {move.suggestion.weapon}, {move.suggestion.room}
+                            </div>
+                            <div style={{ color: '#64748b', fontSize: '0.65rem', marginTop: '0.25rem' }}>
+                              {Object.entries(move.responses).map(([p, r]) => 
+                                `${p}: ${r}`
+                              ).join(' • ')}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Card Reveal Event */}
+                <div style={{
+                  ...styles.card,
+                  padding: '1rem',
+                  backgroundColor: '#1e293b'
+                }}>
+                  <h3 style={{ marginBottom: '1rem', fontSize: '1rem', color: '#e2e8f0' }}>
+                    🎴 Card Reveal Event
+                  </h3>
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    color: '#94a3b8', 
+                    marginBottom: '1rem',
+                    padding: '0.5rem',
+                    backgroundColor: '#0f172a',
+                    borderRadius: '0.375rem'
+                  }}>
+                    ℹ️ When a player privately reveals a card to another, record it here to update their knowledge.
+                  </div>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div>
+                      <label style={styles.label}>Card Revealed</label>
+                      <select
+                        style={styles.select}
+                        value={revealInput.card}
+                        onChange={(e) => setRevealInput({...revealInput, card: e.target.value})}
+                      >
+                        <option value="">Select card</option>
+                        {ALL_CARDS.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label style={styles.label}>Player Has It</label>
+                      <select
+                        style={styles.select}
+                        value={revealInput.player}
+                        onChange={(e) => setRevealInput({...revealInput, player: e.target.value})}
+                      >
+                        <option value="">Select player</option>
+                        {players.map(p => (
+                          <option key={p.name} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <button
+                      onClick={logCardReveal}
+                      disabled={!revealInput.card || !revealInput.player}
+                      style={{
+                        ...styles.button,
+                        background: '#8b5cf6',
+                        ...((!revealInput.card || !revealInput.player) && styles.buttonDisabled)
+                      }}
+                    >
+                      Log Card Reveal
+                    </button>
+                  </div>
                 </div>
               </div>
               
@@ -2568,11 +2889,8 @@ export default function BoardBrain() {
                         fontWeight: '600',
                         color: '#cbd5e1'
                       }}>
-                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginBottom: '0.1rem' }}>
-                          Player {idx + 1}
-                        </div>
-                        <div style={{ fontSize: '0.8rem' }}>
-                          {p.name}
+                        <div style={{ fontSize: '0.9rem' }}>
+                          P{idx + 1}
                         </div>
                       </div>
                     ))}

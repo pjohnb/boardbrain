@@ -41,7 +41,7 @@ export default function BoardBrain() {
   // Structure: { "Ann": [...cards], "Lisa": [...cards], etc }
   
   // Host Mode Setup: Enable entering all players' cards
-  const [hostSetupMode, setHostSetupMode] = useState(false);
+  const [hostSetupMode, setHostSetupMode] = useState(null); // null | false | true - null means not yet chosen
   const [hostModeCards, setHostModeCards] = useState({});
   // Structure during setup: { "Ann": [...cards], "Lisa": [...cards], etc }
   
@@ -206,6 +206,7 @@ export default function BoardBrain() {
   };
 
   const initializeKnowledgeMatrix = () => {
+    console.log('🔧 initializeKnowledgeMatrix:', { myPlayerIndex, hostRole, myCards: myCards.length });
     const matrix = {};
     
     ALL_CARDS.forEach(card => {
@@ -214,8 +215,9 @@ export default function BoardBrain() {
         ...Object.fromEntries(players.map(p => [p.name, '?']))
       };
       
-      // Mark my cards
-      if (myCards.includes(card)) {
+      // Mark my cards (only in player mode with valid myPlayerIndex)
+      if (myCards.includes(card) && myPlayerIndex !== null && myPlayerIndex !== undefined && players[myPlayerIndex]) {
+        console.log(`  Marking ${card} as mine for player ${players[myPlayerIndex].name}`);
         matrix[card][players[myPlayerIndex].name] = 'HAS';
         matrix[card].solution = 'NO';
       }
@@ -1635,47 +1637,110 @@ export default function BoardBrain() {
           </div>
 
           <div style={styles.card}>
-            <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Step 1</h2>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Choose Your Mode</h2>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+              How do you want to use BoardBrain?
+            </p>
             
-            {/* Host Mode Toggle */}
-            <div style={{ 
-              marginBottom: '1.5rem',
-              padding: '1rem',
-              backgroundColor: '#0f172a',
-              borderRadius: '0.375rem',
-              border: hostSetupMode ? '2px solid #10b981' : '2px solid #475569'
-            }}>
-              <label style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '0.75rem',
-                cursor: 'pointer'
-              }}>
-                <input
-                  type="checkbox"
-                  checked={hostSetupMode}
-                  onChange={(e) => setHostSetupMode(e.target.checked)}
-                  style={{
-                    width: '1.25rem',
-                    height: '1.25rem',
-                    cursor: 'pointer'
-                  }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ 
-                    fontSize: '1rem', 
-                    fontWeight: '600', 
-                    color: hostSetupMode ? '#10b981' : '#cbd5e1',
-                    marginBottom: '0.25rem'
-                  }}>
-                    🖥️ Enable Host Mode
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                    Facilitate a physical game or test the system with full visibility
+            {/* Mode Selection Buttons */}
+            <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
+              {/* Single Player Mode */}
+              <button
+                onClick={() => {
+                  setHostSetupMode(false);
+                  setHostRole(null);
+                }}
+                style={{
+                  ...styles.card,
+                  padding: '1.5rem',
+                  cursor: 'pointer',
+                  border: hostSetupMode === false ? '3px solid #3b82f6' : '2px solid #475569',
+                  backgroundColor: hostSetupMode === false ? '#1e3a8a' : '#0f172a',
+                  textAlign: 'left',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div style={{ fontSize: '2rem' }}>🎲</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontSize: '1.125rem', 
+                      fontWeight: '600', 
+                      color: hostSetupMode === false ? '#60a5fa' : '#cbd5e1',
+                      marginBottom: '0.5rem' 
+                    }}>
+                      Single Player Mode
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                      I'm playing alone or manually tracking the game.
+                    </div>
+                    <ul style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0 1.25rem', lineHeight: '1.6' }}>
+                      <li>I'll enter my own cards</li>
+                      <li>I'll manually log all moves</li>
+                      <li>Standard single-player experience</li>
+                    </ul>
                   </div>
                 </div>
-              </label>
+              </button>
+              
+              {/* Host/Facilitate Mode */}
+              <button
+                onClick={() => {
+                  setHostSetupMode(true);
+                }}
+                style={{
+                  ...styles.card,
+                  padding: '1.5rem',
+                  cursor: 'pointer',
+                  border: hostSetupMode === true ? '3px solid #10b981' : '2px solid #475569',
+                  backgroundColor: hostSetupMode === true ? '#064e3b' : '#0f172a',
+                  textAlign: 'left',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div style={{ fontSize: '2rem' }}>🖥️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontSize: '1.125rem', 
+                      fontWeight: '600', 
+                      color: hostSetupMode === true ? '#10b981' : '#cbd5e1',
+                      marginBottom: '0.5rem' 
+                    }}>
+                      Host/Facilitate Mode
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                      I'm facilitating a physical game at the table.
+                    </div>
+                    <ul style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0 1.25rem', lineHeight: '1.6' }}>
+                      <li>Enter ALL players' cards (full visibility)</li>
+                      <li>Choose to play yourself or just facilitate</li>
+                      <li>Test constraint visualization across perspectives</li>
+                    </ul>
+                  </div>
+                </div>
+              </button>
             </div>
+            
+            {hostSetupMode !== null && (
+              <div style={{
+                padding: '1rem',
+                backgroundColor: '#0f172a',
+                borderRadius: '0.375rem',
+                border: '2px solid ' + (hostSetupMode === true ? '#10b981' : '#3b82f6'),
+                marginBottom: '1.5rem'
+              }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem', color: hostSetupMode === true ? '#10b981' : '#60a5fa' }}>
+                  ✅ {hostSetupMode === true ? 'Host/Facilitate Mode' : 'Single Player Mode'} Selected
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                  {hostSetupMode === true ? 
+                    'Next: Choose if you\'re playing or just facilitating' :
+                    'Next: Enter player names and setup your game'
+                  }
+                </div>
+              </div>
+            )}
             
             {/* Number of Players */}
             <div style={{ marginBottom: '1.5rem' }}>
@@ -1704,19 +1769,19 @@ export default function BoardBrain() {
             {/* Continue Button */}
             <button
               onClick={() => {
-                if (hostSetupMode) {
+                if (hostSetupMode === true) {
                   setGamePhase('hostRoleSelect');
                 } else {
                   setGamePhase('playerSetup');
                 }
               }}
-              disabled={!numPlayers}
+              disabled={!numPlayers || hostSetupMode === null}
               style={{
                 ...styles.button,
-                ...(!numPlayers && styles.buttonDisabled)
+                ...( (!numPlayers || hostSetupMode === null) && styles.buttonDisabled)
               }}
             >
-              Next: {hostSetupMode ? 'Host Role Selection' : 'Player Setup'} →
+              Next: {hostSetupMode === true ? 'Choose Your Role' : 'Player Setup'} →
             </button>
           </div>
         </div>
@@ -1728,6 +1793,7 @@ export default function BoardBrain() {
   // HOST ROLE SELECTION (Host Mode Only)
   // ============================================================================
   if (gamePhase === 'hostRoleSelect') {
+    console.log('📍 Rendering hostRoleSelect, hostRole:', hostRole);
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
@@ -1745,7 +1811,9 @@ export default function BoardBrain() {
             {/* Referee Option */}
             <button
               onClick={() => {
+                console.log('🎯 REFEREE SELECTED');
                 setHostRole('referee');
+                console.log('  hostRole set to: referee');
                 setGamePhase('playerSetup');
               }}
               style={{
@@ -1782,7 +1850,9 @@ export default function BoardBrain() {
             {/* Player + Host Option */}
             <button
               onClick={() => {
+                console.log('🎮 PLAYER+HOST SELECTED');
                 setHostRole('player');
+                console.log('  hostRole set to: player');
                 setGamePhase('playerSetup');
               }}
               style={{
@@ -1842,6 +1912,8 @@ export default function BoardBrain() {
   // PLAYER SETUP SCREEN
   // ============================================================================
   if (gamePhase === 'playerSetup') {
+    console.log('📍 Rendering playerSetup, hostRole:', hostRole, 'hostSetupMode:', hostSetupMode);
+    
     const usedCharacters = players.map(p => p.character).filter(c => c);
     const availableCharacters = CLUE_DATA.suspects.filter(c => !usedCharacters.includes(c));
     const allPlayersNamed = players.every(p => p.name.trim() !== '');
@@ -1977,8 +2049,18 @@ export default function BoardBrain() {
               </button>
               <button
                 onClick={() => {
-                  if (hostRole === 'player' && myPlayerIndex !== null) {
-                    setMyCharacter(players[myPlayerIndex].character);
+                  // CRITICAL: Set myPlayerIndex BEFORE changing phase!
+                  if (hostRole === 'player') {
+                    if (myPlayerIndex === null) {
+                      console.log('🔧 Setting myPlayerIndex in button click:', players.length - 1);
+                      setMyPlayerIndex(players.length - 1);
+                    }
+                    if (myPlayerIndex !== null) {
+                      setMyCharacter(players[myPlayerIndex].character);
+                    } else {
+                      // Just set it now if null
+                      setMyCharacter(players[players.length - 1].character);
+                    }
                   }
                   // Host mode: Go to solution setup first
                   // Single player: Go directly to card setup
@@ -2521,6 +2603,21 @@ export default function BoardBrain() {
               </button>
               <button
                 onClick={() => {
+                  console.log('🎮 START PLAYING CLICKED');
+                  console.log('  hostRole:', hostRole);
+                  console.log('  myPlayerIndex BEFORE:', myPlayerIndex);
+                  
+                  // CRITICAL: Ensure myPlayerIndex is set for player mode!
+                  let finalPlayerIndex = myPlayerIndex;
+                  if (hostRole === 'player' && (myPlayerIndex === null || myPlayerIndex === undefined)) {
+                    console.log('  ⚠️ myPlayerIndex was null! Setting to last player...');
+                    finalPlayerIndex = players.length - 1;
+                    setMyPlayerIndex(finalPlayerIndex);
+                    setMyCharacter(players[finalPlayerIndex].character);
+                  }
+                  
+                  console.log('  myPlayerIndex AFTER:', finalPlayerIndex);
+                  
                   if (hostSetupMode) {
                     // Host mode: Set all players' cards and remainder
                     const allAssignedCards = Object.values(hostModeCards).flat();
@@ -2532,14 +2629,18 @@ export default function BoardBrain() {
                     
                     setAllPlayersCards(hostModeCards);
                     // In player mode, set myCards; in referee mode, myCards stays empty
-                    if (hostRole === 'player' && myPlayerIndex !== null && players[myPlayerIndex]) {
-                      setMyCards(hostModeCards[players[myPlayerIndex].name] || []);
-                    } else {
+                    if (hostRole === 'player' && finalPlayerIndex !== null && players[finalPlayerIndex]) {
+                      console.log('  Setting myCards for player:', players[finalPlayerIndex].name);
+                      setMyCards(hostModeCards[players[finalPlayerIndex].name] || []);
+                    } else if (hostRole === 'referee') {
+                      console.log('  Referee mode - no myCards');
                       setMyCards([]); // Referee has no cards
                     }
                     setRemainderCards(remainder);
                     setHostMode(true); // Auto-enable host mode for viewing
                   }
+                  
+                  console.log('  → Transitioning to playing phase...');
                   setGamePhase('playing');
                 }}
                 disabled={

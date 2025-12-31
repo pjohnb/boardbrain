@@ -45,6 +45,9 @@ export default function BoardBrain() {
   const [hostModeCards, setHostModeCards] = useState({});
   // Structure during setup: { "Ann": [...cards], "Lisa": [...cards], etc }
   
+  // Host Role: 'referee' (not playing) or 'player' (also playing)
+  const [hostRole, setHostRole] = useState(null); // null | 'referee' | 'player'
+  
   // Game state
   const [currentTurn, setCurrentTurn] = useState(1);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0); // Whose turn is it
@@ -1617,6 +1620,46 @@ export default function BoardBrain() {
           <div style={styles.card}>
             <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem' }}>Game Setup - Step 1</h2>
             
+            {/* Host Mode Toggle */}
+            <div style={{ 
+              marginBottom: '1.5rem',
+              padding: '1rem',
+              backgroundColor: '#0f172a',
+              borderRadius: '0.375rem',
+              border: hostSetupMode ? '2px solid #10b981' : '2px solid #475569'
+            }}>
+              <label style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.75rem',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={hostSetupMode}
+                  onChange={(e) => setHostSetupMode(e.target.checked)}
+                  style={{
+                    width: '1.25rem',
+                    height: '1.25rem',
+                    cursor: 'pointer'
+                  }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ 
+                    fontSize: '1rem', 
+                    fontWeight: '600', 
+                    color: hostSetupMode ? '#10b981' : '#cbd5e1',
+                    marginBottom: '0.25rem'
+                  }}>
+                    🖥️ Enable Host Mode
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    Facilitate a physical game or test the system with full visibility
+                  </div>
+                </div>
+              </label>
+            </div>
+            
             {/* Number of Players */}
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={styles.label}>Number of Players</label>
@@ -1643,14 +1686,134 @@ export default function BoardBrain() {
 
             {/* Continue Button */}
             <button
-              onClick={() => setGamePhase('playerSetup')}
+              onClick={() => {
+                if (hostSetupMode) {
+                  setGamePhase('hostRoleSelect');
+                } else {
+                  setGamePhase('playerSetup');
+                }
+              }}
               disabled={!numPlayers}
               style={{
                 ...styles.button,
                 ...(!numPlayers && styles.buttonDisabled)
               }}
             >
-              Next: Player Setup →
+              Next: {hostSetupMode ? 'Host Role Selection' : 'Player Setup'} →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // HOST ROLE SELECTION (Host Mode Only)
+  // ============================================================================
+  if (gamePhase === 'hostRoleSelect') {
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>More Brain. Better Game.</p>
+          </div>
+
+          <div style={styles.card}>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Host Mode - Choose Your Role</h2>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+              How do you want to participate in this game?
+            </p>
+            
+            {/* Referee Option */}
+            <button
+              onClick={() => {
+                setHostRole('referee');
+                setGamePhase('playerSetup');
+              }}
+              style={{
+                ...styles.card,
+                padding: '1.5rem',
+                marginBottom: '1rem',
+                cursor: 'pointer',
+                border: '2px solid #10b981',
+                backgroundColor: '#0f172a',
+                textAlign: 'left',
+                width: '100%',
+                transition: 'all 0.2s'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                <div style={{ fontSize: '2rem' }}>🎯</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#10b981', marginBottom: '0.5rem' }}>
+                    Referee Only (Recommended)
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
+                    I'm facilitating a physical board game at the table.
+                  </div>
+                  <ul style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0 1.25rem', lineHeight: '1.6' }}>
+                    <li>I will NOT be playing</li>
+                    <li>I'll input moves for all players</li>
+                    <li>I'll watch constraint evolution across all perspectives</li>
+                    <li>Clean testing environment</li>
+                  </ul>
+                </div>
+              </div>
+            </button>
+            
+            {/* Player + Host Option */}
+            <button
+              onClick={() => {
+                setHostRole('player');
+                setGamePhase('playerSetup');
+              }}
+              style={{
+                ...styles.card,
+                padding: '1.5rem',
+                marginBottom: '1.5rem',
+                cursor: 'pointer',
+                border: '2px solid #f59e0b',
+                backgroundColor: '#0f172a',
+                textAlign: 'left',
+                width: '100%',
+                transition: 'all 0.2s'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                <div style={{ fontSize: '2rem' }}>🎮</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#f59e0b', marginBottom: '0.5rem' }}>
+                    Player + Host (Testing Mode)
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
+                    I'm testing the system solo or with friends.
+                  </div>
+                  <ul style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0 1.25rem', lineHeight: '1.6' }}>
+                    <li>I'll play as one of the players</li>
+                    <li>I'll simulate/input all moves</li>
+                    <li>I acknowledge I can see everyone's cards (testing only!)</li>
+                    <li>Useful for solo development/debugging</li>
+                  </ul>
+                </div>
+              </div>
+            </button>
+
+            {/* Back Button */}
+            <button
+              onClick={() => {
+                setGamePhase('setup');
+                setHostSetupMode(false);
+                setHostRole(null);
+              }}
+              style={{
+                ...styles.button,
+                background: 'transparent',
+                border: '1px solid #475569',
+                width: '100%'
+              }}
+            >
+              ← Back
             </button>
           </div>
         </div>
@@ -1667,9 +1830,14 @@ export default function BoardBrain() {
     const allPlayersNamed = players.every(p => p.name.trim() !== '');
     const allCharactersAssigned = players.every(p => p.character !== '');
     
-    // Auto-set host to last player if not yet set
-    if (myPlayerIndex === null && players.length > 0) {
+    // Auto-set host to last player if not yet set (only in player mode)
+    if (hostRole === 'player' && myPlayerIndex === null && players.length > 0) {
       setMyPlayerIndex(players.length - 1);
+    }
+    
+    // In referee mode, host is not a player
+    if (hostRole === 'referee' && myPlayerIndex !== null) {
+      setMyPlayerIndex(null);
     }
     
     return (
@@ -1681,9 +1849,14 @@ export default function BoardBrain() {
           </div>
 
           <div style={styles.card}>
-            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Game Setup - Step 2: Players</h2>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>
+              Game Setup - Step 2: {hostRole === 'referee' ? 'Player Names' : 'Players'}
+            </h2>
             <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
-              Enter each player's name and assign their character. You (host) are automatically the last player.
+              {hostRole === 'referee' ? 
+                'Enter the names of players at the table. As referee, you are NOT playing.' :
+                'Enter each player\'s name and assign their character. You (host) are automatically the last player.'
+              }
             </p>
             
             <div style={{ marginBottom: '1.5rem' }}>
@@ -1708,7 +1881,7 @@ export default function BoardBrain() {
                         }}>
                           Player {idx + 1}
                         </span>
-                        {isLastPlayer && (
+                        {hostRole === 'player' && isLastPlayer && (
                           <span style={{ 
                             fontSize: '0.75rem', 
                             color: '#fbbf24',
@@ -1720,7 +1893,7 @@ export default function BoardBrain() {
                           </span>
                         )}
                       </div>
-                      {!isLastPlayer && (
+                      {hostRole === 'player' && !isLastPlayer && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <input
                             type="radio"
@@ -1797,7 +1970,9 @@ export default function BoardBrain() {
               </button>
               <button
                 onClick={() => {
-                  setMyCharacter(players[myPlayerIndex].character);
+                  if (hostRole === 'player' && myPlayerIndex !== null) {
+                    setMyCharacter(players[myPlayerIndex].character);
+                  }
                   // Host mode: Go to solution setup first
                   // Single player: Go directly to card setup
                   if (hostSetupMode) {
@@ -1806,11 +1981,15 @@ export default function BoardBrain() {
                     setGamePhase('cardSetup');
                   }
                 }}
-                disabled={!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null}
+                disabled={
+                  !allPlayersNamed || 
+                  !allCharactersAssigned || 
+                  (hostRole === 'player' && myPlayerIndex === null)
+                }
                 style={{
                   ...styles.button,
                   flex: 2,
-                  ...(!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null ? styles.buttonDisabled : {})
+                  ...((!allPlayersNamed || !allCharactersAssigned || (hostRole === 'player' && myPlayerIndex === null)) && styles.buttonDisabled)
                 }}
               >
                 Next: {hostSetupMode ? 'Solution Setup' : 'Card Setup'} →
@@ -2411,7 +2590,11 @@ export default function BoardBrain() {
             <div style={{ flex: '1' }}>
               <h1 style={{ ...styles.title, fontSize: '2.5rem', textAlign: 'center' }}>BoardBrain™</h1>
               <p style={{ color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center' }}>
-                Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`} • You are Playing as {players[myPlayerIndex]?.name} ({myCharacter})
+                Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`}
+                {hostRole === 'referee' ? 
+                  ' • You are Referee (Facilitating)' :
+                  ` • You are Playing as ${players[myPlayerIndex]?.name} (${myCharacter})`
+                }
               </p>
             </div>
             
@@ -2439,43 +2622,45 @@ export default function BoardBrain() {
             marginBottom: '1.5rem',
             flexWrap: 'wrap'
           }}>
-            {/* My Cards */}
-            <div style={{
-              ...styles.card,
-              flex: '1 1 300px',
-              padding: '1rem',
-              backgroundColor: '#1e293b',
-              border: '2px solid #8b5cf6'
-            }}>
-              <h4 style={{ 
-                fontSize: '0.875rem', 
-                fontWeight: '600',
-                color: '#8b5cf6',
-                marginBottom: '0.75rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
+            {/* My Cards - Only show in player mode */}
+            {hostRole === 'player' && (
+              <div style={{
+                ...styles.card,
+                flex: '1 1 300px',
+                padding: '1rem',
+                backgroundColor: '#1e293b',
+                border: '2px solid #8b5cf6'
               }}>
-                🎴 My Cards ({myCards.length})
-              </h4>
-              <div style={{ 
-                display: 'flex', 
-                flexWrap: 'wrap', 
-                gap: '0.5rem' 
-              }}>
-                {myCards.map(card => (
-                  <span key={card} style={{
-                    padding: '0.375rem 0.75rem',
-                    backgroundColor: '#8b5cf6',
-                    color: 'white',
-                    borderRadius: '0.375rem',
-                    fontSize: '0.875rem',
-                    fontWeight: '500'
-                  }}>
-                    {card}
-                  </span>
-                ))}
+                <h4 style={{ 
+                  fontSize: '0.875rem', 
+                  fontWeight: '600',
+                  color: '#8b5cf6',
+                  marginBottom: '0.75rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  🎴 My Cards ({myCards.length})
+                </h4>
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '0.5rem' 
+                }}>
+                  {myCards.map(card => (
+                    <span key={card} style={{
+                      padding: '0.375rem 0.75rem',
+                      backgroundColor: '#8b5cf6',
+                      color: 'white',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}>
+                      {card}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Public/Remainder Cards */}
             {remainderCards.length > 0 && (

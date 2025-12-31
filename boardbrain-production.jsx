@@ -1830,15 +1830,18 @@ export default function BoardBrain() {
     const allPlayersNamed = players.every(p => p.name.trim() !== '');
     const allCharactersAssigned = players.every(p => p.character !== '');
     
-    // Auto-set host to last player if not yet set (only in player mode)
-    if (hostRole === 'player' && myPlayerIndex === null && players.length > 0) {
-      setMyPlayerIndex(players.length - 1);
-    }
-    
-    // In referee mode, host is not a player
-    if (hostRole === 'referee' && myPlayerIndex !== null) {
-      setMyPlayerIndex(null);
-    }
+    // Use useEffect to set myPlayerIndex to avoid setState during render
+    React.useEffect(() => {
+      // Auto-set host to last player if not yet set (only in player mode)
+      if (hostRole === 'player' && myPlayerIndex === null && players.length > 0) {
+        setMyPlayerIndex(players.length - 1);
+      }
+      
+      // In referee mode, host is not a player
+      if (hostRole === 'referee' && myPlayerIndex !== null) {
+        setMyPlayerIndex(null);
+      }
+    }, [hostRole, myPlayerIndex, players.length]);
     
     return (
       <div style={styles.container}>
@@ -2524,7 +2527,12 @@ export default function BoardBrain() {
                     );
                     
                     setAllPlayersCards(hostModeCards);
-                    setMyCards(hostModeCards[players[myPlayerIndex].name] || []);
+                    // In player mode, set myCards; in referee mode, myCards stays empty
+                    if (hostRole === 'player' && myPlayerIndex !== null && players[myPlayerIndex]) {
+                      setMyCards(hostModeCards[players[myPlayerIndex].name] || []);
+                    } else {
+                      setMyCards([]); // Referee has no cards
+                    }
                     setRemainderCards(remainder);
                     setHostMode(true); // Auto-enable host mode for viewing
                   }
@@ -2576,6 +2584,44 @@ export default function BoardBrain() {
   // PLAYING SCREEN
   // ============================================================================
   if (gamePhase === 'playing') {
+    // Debug logging
+    console.log('🎮 PLAYING PHASE STARTED');
+    console.log('  hostRole:', hostRole);
+    console.log('  hostMode:', hostMode);
+    console.log('  myPlayerIndex:', myPlayerIndex);
+    console.log('  myCharacter:', myCharacter);
+    console.log('  players:', players);
+    console.log('  myCards:', myCards);
+    
+    // Safety check for player mode
+    if (hostRole === 'player' && (myPlayerIndex === null || !players[myPlayerIndex])) {
+      console.error('❌ ERROR: Player mode but myPlayerIndex is invalid!');
+      return (
+        <div style={styles.container}>
+          <div style={{ ...styles.card, maxWidth: '40rem', margin: '2rem auto', padding: '2rem' }}>
+            <h2 style={{ color: '#ef4444', marginBottom: '1rem' }}>⚠️ Setup Error</h2>
+            <p style={{ color: '#cbd5e1', marginBottom: '1rem' }}>
+              There was an error during setup. Please start over.
+            </p>
+            <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+              Technical details: Player mode requires a valid player selection.
+            </p>
+            <button
+              onClick={() => {
+                setGamePhase('setup');
+                setHostSetupMode(false);
+                setHostRole(null);
+                setMyPlayerIndex(null);
+              }}
+              style={styles.button}
+            >
+              ← Back to Setup
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: hostMode ? '100%' : '90rem', margin: '0 auto', padding: hostMode ? '0.5rem' : '0' }}>
@@ -2593,7 +2639,10 @@ export default function BoardBrain() {
                 Turn {currentTurn} • {moveInput.suggester ? `${moveInput.suggester}'s Turn` : `${players[currentPlayerIndex]?.name}'s Turn`}
                 {hostRole === 'referee' ? 
                   ' • You are Referee (Facilitating)' :
-                  ` • You are Playing as ${players[myPlayerIndex]?.name} (${myCharacter})`
+                  (myPlayerIndex !== null && players[myPlayerIndex] ? 
+                    ` • You are Playing as ${players[myPlayerIndex].name} (${myCharacter || players[myPlayerIndex].character})` :
+                    ' • You are Playing (Host)'
+                  )
                 }
               </p>
             </div>

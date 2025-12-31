@@ -29,6 +29,13 @@ export default function BoardBrain() {
   const [myCards, setMyCards] = useState([]);
   const [remainderCards, setRemainderCards] = useState([]);
   
+  // Solution cards (secret envelope) - 3 cards
+  const [solutionCards, setSolutionCards] = useState({
+    suspect: '',
+    weapon: '',
+    room: ''
+  });
+  
   // Host Mode: Track ALL players' actual cards for GLOBAL view
   const [allPlayersCards, setAllPlayersCards] = useState({});
   // Structure: { "Ann": [...cards], "Lisa": [...cards], etc }
@@ -68,6 +75,10 @@ export default function BoardBrain() {
     player: ''
   });
   
+  // Card reveal popup during move logging
+  const [showCardRevealPopup, setShowCardRevealPopup] = useState(false);
+  const [pendingMoveData, setPendingMoveData] = useState(null);
+  
   // Report visibility
   const [showReport, setShowReport] = useState(false);
   
@@ -86,9 +97,16 @@ export default function BoardBrain() {
   useEffect(() => {
     if (gamePhase === 'playing' && Object.keys(knowledgeMatrix).length === 0) {
       initializeKnowledgeMatrix();
-      initializePlayerKnowledge();
     }
   }, [gamePhase]);
+  
+  // Initialize player knowledge when allPlayersCards is set (for Host Mode)
+  useEffect(() => {
+    if (gamePhase === 'playing' && Object.keys(allPlayersCards).length > 0 && Object.keys(playerKnowledge).length === 0) {
+      console.log('🔄 Initializing player knowledge from allPlayersCards:', allPlayersCards);
+      initializePlayerKnowledge();
+    }
+  }, [allPlayersCards, gamePhase]);
   
   // Initialize first player when game starts
   useEffect(() => {
@@ -104,19 +122,21 @@ export default function BoardBrain() {
   }, [gamePhase]);
 
   const initializePlayerKnowledge = () => {
-    const allPlayerKnowledge = {};
+    console.log('🔧 Initializing player knowledge...');
+    console.log('All Players Cards (HOST VIEW ONLY):', allPlayersCards);
     
-    // Use existing allPlayersCards if set (from host mode setup)
-    // Otherwise initialize empty for single-player mode
-    const cardsToUse = Object.keys(allPlayersCards).length > 0 ? allPlayersCards : {};
+    const allPlayerKnowledge = {};
     
     players.forEach((player, playerIdx) => {
       // Initialize each player's knowledge matrix
       const playerMatrix = {};
       
-      // Get this player's actual cards
-      const playerActualCards = cardsToUse[player.name] || 
-                                (playerIdx === myPlayerIndex ? myCards : []);
+      // CRITICAL: Each player knows ONLY their own cards
+      // Do NOT leak allPlayersCards info into their knowledge!
+      // Only host sees allPlayersCards in GLOBAL view
+      const playerActualCards = allPlayersCards[player.name] || [];
+      
+      console.log(`  Player ${playerIdx + 1} ${player.name}: ${playerActualCards.length} cards`, playerActualCards);
       
       ALL_CARDS.forEach(card => {
         playerMatrix[card] = {
@@ -124,26 +144,35 @@ export default function BoardBrain() {
           ...Object.fromEntries(players.map(p => [p.name, '?']))
         };
         
-        // Each player knows their own cards
+        // Player knows ONLY their own cards
+        // Everything else starts as '?'
         if (playerActualCards.includes(card)) {
           playerMatrix[card][player.name] = 'HAS';
           playerMatrix[card].solution = 'NO';
         }
         
-        // Everyone knows remainder cards
+        // Everyone knows remainder/public cards
         if (remainderCards.includes(card)) {
           players.forEach(p => playerMatrix[card][p.name] = 'NO');
           playerMatrix[card].solution = 'NO';
         }
+        
+        // Everyone knows solution cards are in envelope (not with any player)
+        const solutionCardsList = [solutionCards.suspect, solutionCards.weapon, solutionCards.room];
+        if (solutionCardsList.includes(card)) {
+          players.forEach(p => playerMatrix[card][p.name] = 'NO');
+          // Solution cards are in envelope - players must deduce them
+        }
       });
       
       allPlayerKnowledge[player.name] = {
-        myCards: playerActualCards,
-        knowledgeMatrix: playerMatrix,
-        constraints: []
+        myCards: playerActualCards,  // This player's actual cards
+        knowledgeMatrix: playerMatrix,  // What they know (starts with only their cards)
+        constraints: []  // Constraints they're tracking
       };
     });
     
+    console.log('✅ Player knowledge initialized:', allPlayerKnowledge);
     setPlayerKnowledge(allPlayerKnowledge);
     
     // If allPlayersCards wasn't set, set it now with what we know
@@ -326,7 +355,13 @@ export default function BoardBrain() {
   };
 
   // UPDATE ALL PLAYER KNOWLEDGE when a move is logged
-  const updateAllPlayerKnowledge = (move, responses, globalMatrix, globalConstraints) => {
+  const updateAllPlayerKnowledge = (move, responses, globalMatrix, globalConstraints, revealedCard) => {
+    console.log('🔄 UPDATE ALL PLAYER KNOWLEDGE');
+    console.log('  Current playerKnowledge:', playerKnowledge);
+    console.log('  Move:', move);
+    console.log('  Responses:', responses);
+    console.log('  Revealed card:', revealedCard);
+    
     const newPlayerKnowledge = { ...playerKnowledge };
     const suggestedCards = [move.suggestion.suspect, move.suggestion.weapon, move.suggestion.room];
     
@@ -338,12 +373,22 @@ export default function BoardBrain() {
       }
     });
     
+    console.log('  Showed player:', showedPlayer);
+    console.log('  Observer (suggester):', move.suggestion.player);
+    
     // Update each player's knowledge
     players.forEach((player) => {
-      if (!newPlayerKnowledge[player.name]) return;
+      if (!newPlayerKnowledge[player.name]) {
+        console.log(`  ⚠️ WARNING: No knowledge for ${player.name}!`);
+        return;
+      }
+      
+      console.log(`  Processing ${player.name}...`);
       
       const playerMatrix = { ...newPlayerKnowledge[player.name].knowledgeMatrix };
       const playerConstraints = [...newPlayerKnowledge[player.name].constraints];
+      
+      const isObserver = (player.name === move.suggestion.player);
       
       // PUBLIC KNOWLEDGE: Process passes (everyone learns these)
       Object.entries(responses).forEach(([responderName, response]) => {
@@ -361,9 +406,56 @@ export default function BoardBrain() {
         }
       });
       
-      // PUBLIC KNOWLEDGE: If someone showed, create constraint
-      if (showedPlayer) {
-        // Everyone knows a constraint was created
+      // KNOWLEDGE ABOUT SHOWN CARD
+      if (showedPlayer && revealedCard) {
+        if (isObserver) {
+          // OBSERVER (suggester) saw the actual card
+          // No constraint - they know exactly which card
+          console.log(`    ${player.name} is OBSERVER - knows ${showedPlayer} showed ${revealedCard}`);
+          if (!playerMatrix[revealedCard]) {
+            playerMatrix[revealedCard] = {
+              solution: '?',
+              ...Object.fromEntries(players.map(p => [p.name, '?']))
+            };
+          }
+          playerMatrix[revealedCard][showedPlayer] = 'HAS';
+          playerMatrix[revealedCard].solution = 'NO';
+          
+          // Observer also knows the OTHER cards were NOT shown
+          suggestedCards.forEach(card => {
+            if (card !== revealedCard) {
+              if (!playerMatrix[card]) {
+                playerMatrix[card] = {
+                  solution: '?',
+                  ...Object.fromEntries(players.map(p => [p.name, '?']))
+                };
+              }
+              // Can't deduce NO from this alone - shower might have multiple cards
+            }
+          });
+        } else {
+          // THIRD PARTY - doesn't know which card
+          // Create constraint (one of the 3 cards)
+          console.log(`    ${player.name} is THIRD PARTY - gets constraint`);
+          const existingConstraint = playerConstraints.find(c =>
+            c.turn === move.turn &&
+            c.showedBy === showedPlayer
+          );
+          
+          if (!existingConstraint) {
+            playerConstraints.push({
+              turn: move.turn,
+              suggester: move.suggestion.player,
+              cards: suggestedCards,
+              showedBy: showedPlayer,
+              observedBy: move.suggestion.player, // Observer is the suggester
+              revealedCard: null, // Third parties don't know
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      } else if (showedPlayer && !revealedCard) {
+        // Everyone knows a constraint was created (old behavior for non-host mode)
         const existingConstraint = playerConstraints.find(c =>
           c.turn === move.turn &&
           c.showedBy === showedPlayer
@@ -375,13 +467,15 @@ export default function BoardBrain() {
             suggester: move.suggestion.player,
             cards: suggestedCards,
             showedBy: showedPlayer,
-            observedBy: move.suggestion.player, // Observer is the suggester
+            observedBy: move.suggestion.player,
             revealedCard: null,
             timestamp: new Date().toISOString()
           });
         }
-        
-        // IMMEDIATE RESOLUTION CHECK (everyone can do this)
+      }
+      
+      // IMMEDIATE RESOLUTION CHECK (for third parties with constraints)
+      if (!isObserver && showedPlayer) {
         const possibleCards = suggestedCards.filter(card =>
           playerMatrix[card] && playerMatrix[card][showedPlayer] !== 'NO'
         );
@@ -454,8 +548,11 @@ export default function BoardBrain() {
       // Update this player's knowledge
       newPlayerKnowledge[player.name].knowledgeMatrix = playerMatrix;
       newPlayerKnowledge[player.name].constraints = playerConstraints;
+      
+      console.log(`  ${player.name} now has ${playerConstraints.length} constraints`);
     });
     
+    console.log('✅ Updated player knowledge:', newPlayerKnowledge);
     setPlayerKnowledge(newPlayerKnowledge);
   };
 
@@ -464,6 +561,38 @@ export default function BoardBrain() {
     
     if (!suggester || !suspect || !weapon || !room) return;
     
+    // Check if someone showed a card
+    const showedPlayer = Object.entries(responses).find(([name, resp]) => resp === 'showed')?.[0];
+    
+    if (showedPlayer && hostMode) {
+      // In host mode, ask which card was shown
+      setPendingMoveData({
+        suggester,
+        suspect,
+        weapon,
+        room,
+        responses,
+        showedPlayer,
+        suggestedCards: [suspect, weapon, room]
+      });
+      setShowCardRevealPopup(true);
+      return; // Don't process move yet - wait for card selection
+    }
+    
+    // No card shown or not in host mode - process normally
+    processMove(null);
+  };
+  
+  const processMove = (revealedCard) => {
+    const moveData = pendingMoveData || {
+      suggester: moveInput.suggester,
+      suspect: moveInput.suspect,
+      weapon: moveInput.weapon,
+      room: moveInput.room,
+      responses: moveInput.responses
+    };
+    
+    const { suggester, suspect, weapon, room, responses } = moveData;
     const suggestedCards = [suspect, weapon, room];
     
     // UPDATE SUGGESTION FREQUENCY - PER PLAYER (for detecting when players hold cards)
@@ -777,9 +906,10 @@ export default function BoardBrain() {
     const newMove = {
       turn: currentTurn,
       suggester,
-      suggestion: { suspect, weapon, room },
+      suggestion: { player: suggester, suspect, weapon, room },
       responses,
       location: room,
+      revealedCard: revealedCard, // Which card was actually shown (if host specified)
       timestamp: new Date().toISOString(),
       // ENHANCED TRACKING FOR REPORT
       constraintsCreated: newConstraints.filter(c => c.turn === currentTurn),
@@ -793,7 +923,7 @@ export default function BoardBrain() {
     calculateProbabilities(newMatrix, newConstraints, newFrequency);
     
     // UPDATE PER-PLAYER KNOWLEDGE (for Host Mode multi-perspective view)
-    updateAllPlayerKnowledge(newMove, responses, newMatrix, newConstraints);
+    updateAllPlayerKnowledge(newMove, responses, newMatrix, newConstraints, revealedCard);
     
     setCurrentTurn(currentTurn + 1);
     
@@ -812,6 +942,10 @@ export default function BoardBrain() {
       room: nextPlayerRoom, // Auto-fill room from last known location
       responses: {}
     });
+    
+    // Clean up popup state
+    setPendingMoveData(null);
+    setShowCardRevealPopup(false);
   };
 
   const logCardReveal = () => {
@@ -1033,14 +1167,24 @@ export default function BoardBrain() {
   };
   
   // HOST MODE: Get cell state from a SPECIFIC player's perspective
-  // HOST MODE: Get cell state from a SPECIFIC player's perspective
   const getCellStateForPlayer = (card, columnPlayerName, viewingPlayerIndex) => {
     const viewingPlayerName = players[viewingPlayerIndex]?.name;
     
     // Get this player's knowledge from playerKnowledge state
     const viewingPlayerData = playerKnowledge[viewingPlayerName];
+    
+    // DEBUG: Log first card for first player only
+    if (card === CLUE_DATA.suspects[0] && viewingPlayerIndex === 0) {
+      console.log(`🔍 getCellStateForPlayer(${card}, ${columnPlayerName}, P${viewingPlayerIndex + 1} ${viewingPlayerName})`);
+      console.log('  viewingPlayerData:', viewingPlayerData);
+      console.log('  All playerKnowledge:', playerKnowledge);
+    }
+    
     if (!viewingPlayerData) {
       // Fallback to unknown if no data
+      if (card === CLUE_DATA.suspects[0] && viewingPlayerIndex === 0) {
+        console.log('  ⚠️ NO DATA for this player!');
+      }
       return {
         type: 'UNKNOWN',
         color: '#64748b',
@@ -1654,7 +1798,13 @@ export default function BoardBrain() {
               <button
                 onClick={() => {
                   setMyCharacter(players[myPlayerIndex].character);
-                  setGamePhase('cardSetup');
+                  // Host mode: Go to solution setup first
+                  // Single player: Go directly to card setup
+                  if (hostSetupMode) {
+                    setGamePhase('solutionSetup');
+                  } else {
+                    setGamePhase('cardSetup');
+                  }
                 }}
                 disabled={!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null}
                 style={{
@@ -1663,7 +1813,127 @@ export default function BoardBrain() {
                   ...(!allPlayersNamed || !allCharactersAssigned || myPlayerIndex === null ? styles.buttonDisabled : {})
                 }}
               >
-                Next: Card Setup →
+                Next: {hostSetupMode ? 'Solution Setup' : 'Card Setup'} →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // SOLUTION SETUP SCREEN (Host Mode Only)
+  // ============================================================================
+  if (gamePhase === 'solutionSetup') {
+    const solutionComplete = solutionCards.suspect && solutionCards.weapon && solutionCards.room;
+    
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '60rem', margin: '0 auto' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>More Brain. Better Game.</p>
+          </div>
+
+          <div style={styles.card}>
+            <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Host Mode - Step 3: Secret Envelope</h2>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+              Select the 3 cards that will be in the secret envelope (the solution players must deduce).
+            </p>
+            
+            {/* Solution Cards Selection */}
+            <div style={{ display: 'grid', gap: '1.5rem', marginBottom: '1.5rem' }}>
+              {/* Suspect */}
+              <div>
+                <label style={styles.label}>Secret Suspect</label>
+                <select
+                  style={styles.select}
+                  value={solutionCards.suspect}
+                  onChange={(e) => setSolutionCards({...solutionCards, suspect: e.target.value})}
+                >
+                  <option value="">Select suspect...</option>
+                  {CLUE_DATA.suspects.map(card => (
+                    <option key={card} value={card}>{card}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Weapon */}
+              <div>
+                <label style={styles.label}>Secret Weapon</label>
+                <select
+                  style={styles.select}
+                  value={solutionCards.weapon}
+                  onChange={(e) => setSolutionCards({...solutionCards, weapon: e.target.value})}
+                >
+                  <option value="">Select weapon...</option>
+                  {CLUE_DATA.weapons.map(card => (
+                    <option key={card} value={card}>{card}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Room */}
+              <div>
+                <label style={styles.label}>Secret Room</label>
+                <select
+                  style={styles.select}
+                  value={solutionCards.room}
+                  onChange={(e) => setSolutionCards({...solutionCards, room: e.target.value})}
+                >
+                  <option value="">Select room...</option>
+                  {CLUE_DATA.rooms.map(card => (
+                    <option key={card} value={card}>{card}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            {/* Summary */}
+            {solutionComplete && (
+              <div style={{
+                padding: '1rem',
+                backgroundColor: '#0f172a',
+                borderRadius: '0.375rem',
+                border: '2px solid #10b981',
+                marginBottom: '1.5rem'
+              }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#10b981', marginBottom: '0.5rem' }}>
+                  ✅ Secret Envelope Contains:
+                </div>
+                <div style={{ fontSize: '0.875rem', color: '#cbd5e1' }}>
+                  {solutionCards.suspect} • {solutionCards.weapon} • {solutionCards.room}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem' }}>
+                  These 3 cards will NOT be distributed to players. Players must deduce them.
+                </div>
+              </div>
+            )}
+
+            {/* Navigation */}
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button
+                onClick={() => setGamePhase('playerSetup')}
+                style={{
+                  ...styles.button,
+                  flex: 1,
+                  background: 'transparent',
+                  border: '1px solid #475569'
+                }}
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => setGamePhase('cardSetup')}
+                disabled={!solutionComplete}
+                style={{
+                  ...styles.button,
+                  flex: 2,
+                  ...(!solutionComplete && styles.buttonDisabled)
+                }}
+              >
+                Next: Distribute Remaining 18 Cards →
               </button>
             </div>
           </div>
@@ -1902,9 +2172,32 @@ export default function BoardBrain() {
             ) : (
               /* HOST MODE: Enter ALL players' cards */
               <div style={{ marginBottom: '1.5rem' }}>
+                {/* Show solution cards */}
+                <div style={{
+                  padding: '1rem',
+                  backgroundColor: '#0f172a',
+                  borderRadius: '0.375rem',
+                  border: '2px solid #10b981',
+                  marginBottom: '1.5rem'
+                }}>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#10b981', marginBottom: '0.5rem' }}>
+                    🔒 Secret Envelope (Not Distributed):
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#cbd5e1' }}>
+                    {solutionCards.suspect} • {solutionCards.weapon} • {solutionCards.room}
+                  </div>
+                </div>
+                
                 {players.map((player, playerIdx) => {
                   const playerCards = hostModeCards[player.name] || [];
-                  const playerCardCount = playerIdx === myPlayerIndex ? cardsPerPlayer : Math.floor(18 / players.length);
+                  // Calculate cards per player from REMAINING 18 cards (21 - 3 solution)
+                  const availableCards = 18;
+                  const baseCards = Math.floor(availableCards / players.length);
+                  const playerCardCount = baseCards;
+                  
+                  // Get cards excluding solution
+                  const solutionCardsList = [solutionCards.suspect, solutionCards.weapon, solutionCards.room];
+                  const availableCardsList = ALL_CARDS.filter(c => !solutionCardsList.includes(c));
                   
                   return (
                     <div key={player.name} style={{
@@ -1929,12 +2222,13 @@ export default function BoardBrain() {
                       </div>
                       
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.5rem' }}>
-                        {ALL_CARDS.map(card => {
+                        {availableCardsList.map(card => {
                           const isSelected = playerCards.includes(card);
                           const usedByOther = Object.entries(hostModeCards).some(([name, cards]) => 
                             name !== player.name && cards.includes(card)
                           );
-                          const isDisabled = (usedByOther || (!isSelected && playerCards.length >= playerCardCount));
+                          const isSolutionCard = solutionCardsList.includes(card);
+                          const isDisabled = (isSolutionCard || usedByOther || (!isSelected && playerCards.length >= playerCardCount));
                           
                           return (
                             <label
@@ -1976,7 +2270,11 @@ export default function BoardBrain() {
                 {/* Remainder Cards in Host Mode */}
                 {remainderCount > 0 && (() => {
                   const allAssignedCards = Object.values(hostModeCards).flat();
-                  const remainderCardsHost = ALL_CARDS.filter(c => !allAssignedCards.includes(c));
+                  const solutionCardsList = [solutionCards.suspect, solutionCards.weapon, solutionCards.room];
+                  // Remainder = cards not assigned and not in solution
+                  const remainderCardsHost = ALL_CARDS.filter(c => 
+                    !allAssignedCards.includes(c) && !solutionCardsList.includes(c)
+                  );
                   
                   return (
                     <div style={{
@@ -2040,7 +2338,11 @@ export default function BoardBrain() {
                   if (hostSetupMode) {
                     // Host mode: Set all players' cards and remainder
                     const allAssignedCards = Object.values(hostModeCards).flat();
-                    const remainder = ALL_CARDS.filter(c => !allAssignedCards.includes(c));
+                    const solutionCardsList = [solutionCards.suspect, solutionCards.weapon, solutionCards.room];
+                    // Remainder = cards not assigned and not in solution
+                    const remainder = ALL_CARDS.filter(c => 
+                      !allAssignedCards.includes(c) && !solutionCardsList.includes(c)
+                    );
                     
                     setAllPlayersCards(hostModeCards);
                     setMyCards(hostModeCards[players[myPlayerIndex].name] || []);
@@ -2052,12 +2354,14 @@ export default function BoardBrain() {
                 disabled={
                   hostSetupMode ? 
                     (() => {
+                      const availableCards = 18; // 21 - 3 solution
                       const allPlayersFilled = players.every((p, idx) => {
-                        const expected = Math.floor(18 / players.length);
+                        const expected = Math.floor(availableCards / players.length);
                         return (hostModeCards[p.name] || []).length === expected;
                       });
-                      const totalCards = Object.values(hostModeCards).flat().length;
-                      return !allPlayersFilled || totalCards !== (18 - remainderCount);
+                      const totalAssigned = Object.values(hostModeCards).flat().length;
+                      const expectedTotal = availableCards - remainderCount;
+                      return !allPlayersFilled || totalAssigned !== expectedTotal;
                     })() :
                     (myCards.length !== cardsPerPlayer ||
                      (remainderCount > 0 && remainderCards.length !== remainderCount))
@@ -2067,12 +2371,14 @@ export default function BoardBrain() {
                   flex: 2,
                   ...(hostSetupMode ? 
                       (() => {
+                        const availableCards = 18; // 21 - 3 solution
                         const allPlayersFilled = players.every((p, idx) => {
-                          const expected = Math.floor(18 / players.length);
+                          const expected = Math.floor(availableCards / players.length);
                           return (hostModeCards[p.name] || []).length === expected;
                         });
-                        const totalCards = Object.values(hostModeCards).flat().length;
-                        return (!allPlayersFilled || totalCards !== (18 - remainderCount)) && styles.buttonDisabled;
+                        const totalAssigned = Object.values(hostModeCards).flat().length;
+                        const expectedTotal = availableCards - remainderCount;
+                        return (!allPlayersFilled || totalAssigned !== expectedTotal) && styles.buttonDisabled;
                       })() :
                       ((myCards.length !== cardsPerPlayer ||
                         (remainderCount > 0 && remainderCards.length !== remainderCount)) && styles.buttonDisabled))
@@ -3836,6 +4142,81 @@ export default function BoardBrain() {
           )}
           {/* END CONDITIONAL: HOST MODE vs PLAYER VIEW */}
         </div>
+        
+        {/* CARD REVEAL POPUP */}
+        {showCardRevealPopup && pendingMoveData && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              ...styles.card,
+              maxWidth: '32rem',
+              padding: '2rem',
+              margin: '1rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#e2e8f0' }}>
+                🎴 Which Card Was Shown?
+              </h2>
+              
+              <div style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem' }}>
+                <strong>{pendingMoveData.showedPlayer}</strong> showed a card to <strong>{pendingMoveData.suggester}</strong>.
+                <br />
+                Which card did they show?
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                {pendingMoveData.suggestedCards.map(card => (
+                  <button
+                    key={card}
+                    onClick={() => {
+                      processMove(card);
+                    }}
+                    style={{
+                      ...styles.button,
+                      background: '#8b5cf6',
+                      padding: '1rem',
+                      fontSize: '1rem',
+                      textAlign: 'left',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <span style={{ fontSize: '1.5rem' }}>
+                      {card.includes('Professor') || card.includes('Colonel') || card.includes('Miss') || card.includes('Mrs') ? '👤' :
+                       card.includes('Knife') || card.includes('Rope') || card.includes('Lead') || card.includes('Wrench') || card.includes('Candlestick') || card.includes('Revolver') ? '🔪' : '🏠'}
+                    </span>
+                    <span>{card}</span>
+                  </button>
+                ))}
+              </div>
+              
+              <button
+                onClick={() => {
+                  setShowCardRevealPopup(false);
+                  setPendingMoveData(null);
+                }}
+                style={{
+                  ...styles.button,
+                  background: 'transparent',
+                  border: '1px solid #475569',
+                  width: '100%'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

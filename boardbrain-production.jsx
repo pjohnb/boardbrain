@@ -123,6 +123,23 @@ export default function BoardBrain() {
       });
     }
   }, [gamePhase]);
+  
+  // Auto-set myPlayerIndex for player mode (TOP LEVEL - runs always!)
+  useEffect(() => {
+    console.log('🔧 myPlayerIndex useEffect:', { hostRole, myPlayerIndex, playersLength: players.length });
+    
+    // Auto-set host to last player if not yet set (only in player mode)
+    if (hostRole === 'player' && myPlayerIndex === null && players.length > 0) {
+      console.log('  → Setting myPlayerIndex to last player:', players.length - 1);
+      setMyPlayerIndex(players.length - 1);
+    }
+    
+    // In referee mode, host is not a player
+    if (hostRole === 'referee' && myPlayerIndex !== null) {
+      console.log('  → Clearing myPlayerIndex for referee mode');
+      setMyPlayerIndex(null);
+    }
+  }, [hostRole, myPlayerIndex, players.length]);
 
   const initializePlayerKnowledge = () => {
     console.log('🔧 Initializing player knowledge...');
@@ -1830,19 +1847,6 @@ export default function BoardBrain() {
     const allPlayersNamed = players.every(p => p.name.trim() !== '');
     const allCharactersAssigned = players.every(p => p.character !== '');
     
-    // Use useEffect to set myPlayerIndex to avoid setState during render
-    React.useEffect(() => {
-      // Auto-set host to last player if not yet set (only in player mode)
-      if (hostRole === 'player' && myPlayerIndex === null && players.length > 0) {
-        setMyPlayerIndex(players.length - 1);
-      }
-      
-      // In referee mode, host is not a player
-      if (hostRole === 'referee' && myPlayerIndex !== null) {
-        setMyPlayerIndex(null);
-      }
-    }, [hostRole, myPlayerIndex, players.length]);
-    
     return (
       <div style={styles.container}>
         <div style={{ maxWidth: '60rem', margin: '0 auto' }}>
@@ -2584,43 +2588,10 @@ export default function BoardBrain() {
   // PLAYING SCREEN
   // ============================================================================
   if (gamePhase === 'playing') {
-    // Debug logging
-    console.log('🎮 PLAYING PHASE STARTED');
+    console.log('🎮 RENDERING PLAYING PHASE');
     console.log('  hostRole:', hostRole);
-    console.log('  hostMode:', hostMode);
     console.log('  myPlayerIndex:', myPlayerIndex);
-    console.log('  myCharacter:', myCharacter);
     console.log('  players:', players);
-    console.log('  myCards:', myCards);
-    
-    // Safety check for player mode
-    if (hostRole === 'player' && (myPlayerIndex === null || !players[myPlayerIndex])) {
-      console.error('❌ ERROR: Player mode but myPlayerIndex is invalid!');
-      return (
-        <div style={styles.container}>
-          <div style={{ ...styles.card, maxWidth: '40rem', margin: '2rem auto', padding: '2rem' }}>
-            <h2 style={{ color: '#ef4444', marginBottom: '1rem' }}>⚠️ Setup Error</h2>
-            <p style={{ color: '#cbd5e1', marginBottom: '1rem' }}>
-              There was an error during setup. Please start over.
-            </p>
-            <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-              Technical details: Player mode requires a valid player selection.
-            </p>
-            <button
-              onClick={() => {
-                setGamePhase('setup');
-                setHostSetupMode(false);
-                setHostRole(null);
-                setMyPlayerIndex(null);
-              }}
-              style={styles.button}
-            >
-              ← Back to Setup
-            </button>
-          </div>
-        </div>
-      );
-    }
     
     return (
       <div style={styles.container}>

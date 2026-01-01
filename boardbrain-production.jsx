@@ -140,6 +140,18 @@ export default function BoardBrain() {
       setMyPlayerIndex(null);
     }
   }, [hostRole, myPlayerIndex, players.length]);
+  
+  // Initialize hostModeCards when entering cardSetup in host mode
+  useEffect(() => {
+    if (gamePhase === 'cardSetup' && hostSetupMode === true && Object.keys(hostModeCards).length === 0 && players.length > 0) {
+      console.log('🔧 Initializing hostModeCards for', players.length, 'players');
+      const initCards = {};
+      players.forEach(p => {
+        initCards[p.name] = [];
+      });
+      setHostModeCards(initCards);
+    }
+  }, [gamePhase, hostSetupMode, players.length]);
 
   const initializePlayerKnowledge = () => {
     console.log('🔧 Initializing player knowledge...');
@@ -2822,8 +2834,8 @@ export default function BoardBrain() {
             marginBottom: '1.5rem',
             flexWrap: 'wrap'
           }}>
-            {/* My Cards - Only show in player mode */}
-            {hostRole === 'player' && (
+            {/* My Cards - Show in single player mode (hostRole=null) or when host is playing (hostRole='player') */}
+            {(hostRole === null || hostRole === 'player') && myCards.length > 0 && (
               <div style={{
                 ...styles.card,
                 flex: '1 1 300px',

@@ -1715,7 +1715,6 @@ export default function BoardBrain() {
                     <ul style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0 1.25rem', lineHeight: '1.6' }}>
                       <li>Enter ALL players' cards (full visibility)</li>
                       <li>As host, do not play - just facilitate</li>
-                      <li>Test constraint visualization across perspectives</li>
                     </ul>
                   </div>
                 </div>
@@ -2027,23 +2026,46 @@ export default function BoardBrain() {
                   
                   <div>
                     <label style={styles.label}>Character</label>
-                    <select
-                      style={styles.select}
-                      value={player.character}
-                      onChange={(e) => {
-                        const newPlayers = [...players];
-                        newPlayers[idx].character = e.target.value;
-                        setPlayers(newPlayers);
-                      }}
-                    >
-                      <option value="">Select character</option>
-                      {player.character && (
-                        <option value={player.character}>{player.character}</option>
-                      )}
-                      {availableCharacters.map(char => (
-                        <option key={char} value={char}>{char}</option>
-                      ))}
-                    </select>
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(3, 1fr)', 
+                      gap: '0.5rem',
+                      marginTop: '0.5rem'
+                    }}>
+                      {CLUE_DATA.suspects.map(char => {
+                        const isUsed = usedCharacters.includes(char) && player.character !== char;
+                        const isSelected = player.character === char;
+                        
+                        return (
+                          <button
+                            key={char}
+                            type="button"
+                            onClick={() => {
+                              if (!isUsed) {
+                                const newPlayers = [...players];
+                                newPlayers[idx].character = isSelected ? '' : char;
+                                setPlayers(newPlayers);
+                              }
+                            }}
+                            disabled={isUsed}
+                            style={{
+                              padding: '0.75rem',
+                              backgroundColor: isSelected ? '#3b82f6' : isUsed ? '#1e293b' : '#0f172a',
+                              border: isSelected ? '2px solid #60a5fa' : '1px solid #334155',
+                              borderRadius: '0.375rem',
+                              color: isSelected ? 'white' : isUsed ? '#64748b' : '#cbd5e1',
+                              cursor: isUsed ? 'not-allowed' : 'pointer',
+                              fontSize: '0.875rem',
+                              fontWeight: isSelected ? '600' : '400',
+                              transition: 'all 0.2s',
+                              opacity: isUsed ? 0.5 : 1
+                            }}
+                          >
+                            {isSelected && '✓ '}{char}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );

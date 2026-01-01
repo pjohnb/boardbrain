@@ -1163,16 +1163,30 @@ export default function BoardBrain() {
       if (avgPossible <= 1.5) intensity = 0.8; // Very narrow (1-2 options)
       else if (avgPossible <= 2.5) intensity = 0.6; // Medium (2-3 options)
       
+      // Get turn numbers for these constraints
+      const turnNumbers = playerConstraints.map(c => c.turn).sort((a, b) => a - b);
+      const uniqueTurns = [...new Set(turnNumbers)];
+      
+      // Create overlay showing turn numbers
+      let overlay = '';
+      if (uniqueTurns.length === 1) {
+        overlay = `T${uniqueTurns[0]}`;
+      } else if (uniqueTurns.length === 2) {
+        overlay = `T${uniqueTurns[0]},${uniqueTurns[1]}`;
+      } else if (uniqueTurns.length >= 3) {
+        overlay = `T${uniqueTurns[0]},${uniqueTurns[1]}+`;
+      } else {
+        overlay = '?';
+      }
+      
       return {
         type: 'CONSTRAINT',
         color: '#f97316',
         intensity: intensity,
-        overlay: playerConstraints.length === 1 ? '¹' : 
-                 playerConstraints.length === 2 ? '²' : 
-                 playerConstraints.length >= 3 ? '³⁺' : '?',
+        overlay: overlay,
         border: '#f97316',
         borderWidth: 2,
-        tooltip: `${playerConstraints.length} constraint(s), ~${avgPossible.toFixed(1)} options avg`
+        tooltip: `${playerConstraints.length} constraint(s) from turns: ${uniqueTurns.join(', ')}, ~${avgPossible.toFixed(1)} options avg`
       };
     }
     
@@ -1304,16 +1318,30 @@ export default function BoardBrain() {
       if (avgPossible <= 1.5) intensity = 0.8;
       else if (avgPossible <= 2.5) intensity = 0.6;
       
+      // Get turn numbers for these constraints
+      const turnNumbers = playerConstraints.map(c => c.turn).sort((a, b) => a - b);
+      const uniqueTurns = [...new Set(turnNumbers)];
+      
+      // Create overlay showing turn numbers
+      let overlay = '';
+      if (uniqueTurns.length === 1) {
+        overlay = `T${uniqueTurns[0]}`;
+      } else if (uniqueTurns.length === 2) {
+        overlay = `T${uniqueTurns[0]},${uniqueTurns[1]}`;
+      } else if (uniqueTurns.length >= 3) {
+        overlay = `T${uniqueTurns[0]},${uniqueTurns[1]}+`;
+      } else {
+        overlay = '?';
+      }
+      
       return {
         type: 'CONSTRAINT',
         color: '#f97316',
         intensity: intensity,
-        overlay: playerConstraints.length === 1 ? '¹' : 
-                 playerConstraints.length === 2 ? '²' : 
-                 playerConstraints.length >= 3 ? '³⁺' : '?',
+        overlay: overlay,
         border: '#f97316',
         borderWidth: 1.5,
-        tooltip: `${playerConstraints.length} constraint(s)`
+        tooltip: `${playerConstraints.length} constraint(s) from turns: ${uniqueTurns.join(', ')}`
       };
     }
     
@@ -2740,21 +2768,51 @@ export default function BoardBrain() {
               </p>
             </div>
             
-            {/* Host Mode Toggle */}
-            <button
-              onClick={() => setHostMode(!hostMode)}
-              style={{
-                ...styles.button,
-                background: hostMode ? '#10b981' : '#6366f1',
-                padding: '0.5rem 1rem',
-                fontSize: '0.875rem',
-                fontWeight: '600',
-                whiteSpace: 'nowrap',
-                flexShrink: 0
-              }}
-            >
-              {hostMode ? '🖥️ HOST MODE' : '👤 Player View'}
-            </button>
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+              {/* Host Mode Toggle */}
+              <button
+                onClick={() => setHostMode(!hostMode)}
+                style={{
+                  ...styles.button,
+                  background: hostMode ? '#10b981' : '#6366f1',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {hostMode ? '🖥️ HOST MODE' : '👤 Player View'}
+              </button>
+              
+              {/* End Game Button */}
+              <button
+                onClick={() => {
+                  if (window.confirm('End this game and start over?')) {
+                    setGamePhase('setup');
+                    setHostSetupMode(null);
+                    setHostRole(null);
+                    setMyPlayerIndex(null);
+                    setPlayers([]);
+                    setMyCards([]);
+                    setAllPlayersCards({});
+                    setConstraints([]);
+                    setMoveHistory([]);
+                    setCurrentTurn(1);
+                  }
+                }}
+                style={{
+                  ...styles.button,
+                  background: '#ef4444',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                🏁 End Game
+              </button>
+            </div>
           </div>
 
           {/* MY CARDS & PUBLIC CARDS DISPLAY */}
@@ -2852,8 +2910,8 @@ export default function BoardBrain() {
               {/* All Player Grids */}
               <div style={{ 
                 display: 'grid', 
-                gridTemplateColumns: `repeat(${Math.min(players.length, 3)}, 1fr)`,
-                gap: '1rem'
+                gridTemplateColumns: `repeat(${Math.min(players.length, 4)}, 1fr)`,
+                gap: '0.5rem'
               }}>
                 {players.map((player, playerIdx) => (
                   <div key={player.name} style={{

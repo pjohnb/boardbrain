@@ -4521,21 +4521,7 @@ export default function BoardBrain() {
                   💾 Export Report
                 </button>
               </div>
-
-              {/* End Game */}
-              <button
-                onClick={() => setGamePhase('gameOver')}
-                style={{
-                  ...styles.button,
-                  background: 'transparent',
-                  border: '1px solid #475569',
-                  color: '#cbd5e1'
-                }}
-              >
-                End Game
-              </button>
             </div>
-          </div>
           )}
           {/* END CONDITIONAL: HOST MODE vs PLAYER VIEW */}
         </div>

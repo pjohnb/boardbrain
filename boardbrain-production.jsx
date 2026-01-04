@@ -2923,19 +2923,19 @@ export default function BoardBrain() {
               <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: `repeat(${Math.min(players.length, 4)}, 1fr)`,
-                gap: '0.5rem'
+                gap: '0.25rem'
               }}>
                 {players.map((player, playerIdx) => (
                   <div key={player.name} style={{
                     ...styles.card,
-                    padding: '0.75rem',
+                    padding: '0.4rem',
                     backgroundColor: '#1e293b'
                   }}>
                     {/* Mini Grid Header */}
                     <div style={{
                       textAlign: 'center',
-                      marginBottom: '0.5rem',
-                      paddingBottom: '0.5rem',
+                      marginBottom: '0.3rem',
+                      paddingBottom: '0.3rem',
                       borderBottom: '1px solid #334155'
                     }}>
                       <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>

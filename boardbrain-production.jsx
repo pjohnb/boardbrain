@@ -4525,7 +4525,6 @@ export default function BoardBrain() {
           )}
           {/* END CONDITIONAL: HOST MODE vs PLAYER VIEW */}
         </div>
-        
         {/* CARD REVEAL POPUP */}
         {showCardRevealPopup && pendingMoveData && (
           <div style={{

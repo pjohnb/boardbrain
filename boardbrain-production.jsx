@@ -1,1641 +1,1229 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, set, onValue, push, update, get } from 'firebase/database';
 
 /**
- * BoardBrain™ Control Room v3 - Mission Control for Clue Players
- * Copyright © 2024-2026 Pat Boulay / Xformative AI. All Rights Reserved.
+ * BoardBrain™ - Multi-Device Clue Deduction Assistant
+ * Copyright © 2024 Pat Boulay. All Rights Reserved.
  * 
- * "Everyone has an AI-aided secret!"
+ * More Brain. Better Game.
+ * Your AI Strategy Partner for Board Games
+ * 
+ * ARCHITECTURE:
+ * - Each player uses their own device (phone/tablet/laptop)
+ * - Real-time sync via Firebase Realtime Database
+ * - Each player sees personalized view based on their knowledge
+ * - Host creates room, players join with room code
  */
 
-// Demo game state - simulates mid-game scenario with rich evidence trails
-const DEMO_STATE = {
-  turn: 7,
-  myCards: ['Colonel Mustard', 'Knife', 'Library', 'Mrs. White'],
-  publicCards: ['Hall', 'Revolver'],  // Remainder cards everyone can see
-  players: ['You', 'Lisa', 'Matthew', 'Ann'],
-  
-  // Probability distributions with detailed evidence trails
-  suspects: {
-    'Col. Mustard': { 
-      prob: 0, 
-      status: 'mine', 
-      evidence: [
-        { type: 'hand', text: 'In my hand at game start' }
-      ]
-    },
-    'Miss Scarlet': { 
-      prob: 42, 
-      status: 'possible', 
-      evidence: [
-        { type: 'constraint', text: 'T2: Ann showed one of [Lead Pipe, Kitchen, Miss Scarlet]' },
-        { type: 'constraint', text: 'T5: Matthew showed one of [Rope, Ballroom, Miss Scarlet]' },
-        { type: 'analysis', text: 'Appears in 2 constraints but never directly eliminated' },
-        { type: 'calc', text: '→ 42% probability in envelope' }
-      ]
-    },
-    'Prof. Plum': { 
-      prob: 8, 
-      status: 'unlikely', 
-      evidence: [
-        { type: 'constraint', text: 'T1: Lisa showed one of [Wrench, Study, Prof. Plum]' },
-        { type: 'constraint', text: 'T6: Matthew showed one of [Lounge, Prof. Plum, Revolver]' },
-        { type: 'analysis', text: 'In 2 constraints with different players → likely one of them has it' },
-        { type: 'calc', text: '→ 8% probability in envelope' }
-      ]
-    },
-    'Mr. Green': { 
-      prob: 38, 
-      status: 'possible', 
-      evidence: [
-        { type: 'constraint', text: 'T4: Ann showed one of [Dining Room, Mr. Green, Candlestick]' },
-        { type: 'analysis', text: 'Only 1 constraint. Other cards: Dining Room (later eliminated), Candlestick (still possible)' },
-        { type: 'calc', text: '→ 38% probability in envelope' }
-      ]
-    },
-    'Mrs. White': { 
-      prob: 0, 
-      status: 'mine', 
-      evidence: [
-        { type: 'hand', text: 'In my hand at game start' }
-      ]
-    },
-    'Mrs. Peacock': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'shown', text: 'T3: Lisa showed Mrs. Peacock directly to me' },
-        { type: 'result', text: '→ ELIMINATED: Lisa has this card' }
-      ]
-    },
-  },
-  weapons: {
-    'Candlestick': { 
-      prob: 67, 
-      status: 'likely', 
-      evidence: [
-        { type: 'constraint', text: 'T4: Ann showed one of [Dining Room, Mr. Green, Candlestick]' },
-        { type: 'analysis', text: 'Only 1 weak constraint in 7 turns' },
-        { type: 'analysis', text: 'Other weapons tested: Knife(mine), Lead Pipe(T2-elim), Revolver(T6), Rope(T3,T5-elim), Wrench(T1-elim)' },
-        { type: 'calc', text: '→ 67% probability in envelope (highest weapon)' }
-      ]
-    },
-    'Knife': { 
-      prob: 0, 
-      status: 'mine', 
-      evidence: [
-        { type: 'hand', text: 'In my hand at game start' }
-      ]
-    },
-    'Lead Pipe': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'shown', text: 'T2: Ann showed Lead Pipe directly to me' },
-        { type: 'context', text: 'Suggestion was [Lead Pipe, Kitchen, Miss Scarlet]' },
-        { type: 'result', text: '→ ELIMINATED: Ann has this card' }
-      ]
-    },
-    'Revolver': { 
-      prob: 18, 
-      status: 'possible', 
-      evidence: [
-        { type: 'constraint', text: 'T6: Matthew showed one of [Lounge, Prof. Plum, Revolver]' },
-        { type: 'analysis', text: 'Lounge was later deduced as Matthew\'s card' },
-        { type: 'analysis', text: 'Remaining possibilities: Prof. Plum or Revolver from this constraint' },
-        { type: 'calc', text: '→ 18% probability in envelope' }
-      ]
-    },
-    'Rope': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'constraint', text: 'T3: Lisa showed one of [Mrs. Peacock, Study, Rope]' },
-        { type: 'shown', text: 'T5: Matthew showed Rope directly to me' },
-        { type: 'context', text: 'T5 suggestion was [Rope, Ballroom, Miss Scarlet]' },
-        { type: 'result', text: '→ ELIMINATED: Matthew has this card' }
-      ]
-    },
-    'Wrench': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'constraint', text: 'T1: Lisa showed one of [Wrench, Study, Prof. Plum]' },
-        { type: 'constraint', text: 'T3: Lisa showed one of [Mrs. Peacock, Study, Rope] — Study appears again!' },
-        { type: 'deduction', text: 'CROSS-REFERENCE: Study is the only card in both T1 and T3 constraints' },
-        { type: 'deduction', text: '→ Lisa must have Study (common card in both showings)' },
-        { type: 'deduction', text: '→ T1 constraint now: Lisa showed one of [Wrench, Prof. Plum]' },
-        { type: 'shown', text: 'Later confirmed: Lisa showed Wrench on T1' },
-        { type: 'result', text: '→ ELIMINATED: Lisa has this card' }
-      ]
-    },
-  },
-  rooms: {
-    'Kitchen': { 
-      prob: 31, 
-      status: 'possible', 
-      evidence: [
-        { type: 'constraint', text: 'T2: Ann showed one of [Lead Pipe, Kitchen, Miss Scarlet]' },
-        { type: 'analysis', text: 'Lead Pipe was directly shown (eliminated from constraint)' },
-        { type: 'analysis', text: 'Remaining: Ann showed Kitchen OR Miss Scarlet on T2' },
-        { type: 'calc', text: '→ 31% probability in envelope' }
-      ]
-    },
-    'Ballroom': { 
-      prob: 8, 
-      status: 'unlikely', 
-      evidence: [
-        { type: 'constraint', text: 'T5: Matthew showed one of [Rope, Ballroom, Miss Scarlet]' },
-        { type: 'analysis', text: 'Rope was directly shown to me (eliminated from constraint)' },
-        { type: 'analysis', text: 'Remaining: Matthew showed Ballroom OR Miss Scarlet on T5' },
-        { type: 'calc', text: '→ 8% probability in envelope' }
-      ]
-    },
-    'Conservatory': { 
-      prob: 45, 
-      status: 'likely', 
-      evidence: [
-        { type: 'analysis', text: 'NEVER SUGGESTED in 7 turns' },
-        { type: 'context', text: 'Rooms tested so far: Kitchen(T2), Ballroom(T5), Dining Room(T4), Lounge(T6), Study(T1,T3)' },
-        { type: 'context', text: 'Rooms never tested: Conservatory, Billiard Room, Hall' },
-        { type: 'analysis', text: 'No constraints = no evidence against it' },
-        { type: 'calc', text: '→ 45% probability in envelope (highest untested room)' }
-      ]
-    },
-    'Dining Room': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'constraint', text: 'T4: Ann showed one of [Dining Room, Mr. Green, Candlestick]' },
-        { type: 'deduction', text: 'DEDUCTION: Ann already showed on T2 from [Lead Pipe, Kitchen, Scarlet]' },
-        { type: 'deduction', text: 'Ann has shown 3 times (T2, T4, and one more) — tracking card overlap...' },
-        { type: 'deduction', text: 'Cross-referencing Ann\'s constraints reveals Dining Room as only unique card' },
-        { type: 'result', text: '→ ELIMINATED: Ann has this card' }
-      ]
-    },
-    'Billiard Room': { 
-      prob: 12, 
-      status: 'possible', 
-      evidence: [
-        { type: 'analysis', text: 'NEVER SUGGESTED in 7 turns' },
-        { type: 'context', text: 'Lower probability than Conservatory due to player position analysis' },
-        { type: 'calc', text: '→ 12% probability in envelope' }
-      ]
-    },
-    'Library': { 
-      prob: 0, 
-      status: 'mine', 
-      evidence: [
-        { type: 'hand', text: 'In my hand at game start' }
-      ]
-    },
-    'Lounge': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'constraint', text: 'T6: Matthew showed one of [Lounge, Prof. Plum, Revolver]' },
-        { type: 'deduction', text: 'DEDUCTION: Matthew showed Rope on T5' },
-        { type: 'deduction', text: 'Matthew\'s T5 constraint was [Rope, Ballroom, Miss Scarlet]' },
-        { type: 'deduction', text: 'No overlap between T5 and T6 constraints except through elimination' },
-        { type: 'deduction', text: 'Process of elimination from Matthew\'s known cards → Lounge confirmed' },
-        { type: 'result', text: '→ ELIMINATED: Matthew has this card' }
-      ]
-    },
-    'Hall': { 
-      prob: 4, 
-      status: 'unlikely', 
-      evidence: [
-        { type: 'analysis', text: 'NEVER SUGGESTED in 7 turns' },
-        { type: 'context', text: 'Lowest probability among untested rooms' },
-        { type: 'context', text: 'Statistical baseline only — no direct evidence for or against' },
-        { type: 'calc', text: '→ 4% probability in envelope' }
-      ]
-    },
-    'Study': { 
-      prob: 0, 
-      status: 'eliminated', 
-      evidence: [
-        { type: 'constraint', text: 'T1: Lisa showed one of [Wrench, Study, Prof. Plum]' },
-        { type: 'constraint', text: 'T3: Lisa showed one of [Mrs. Peacock, Study, Rope]' },
-        { type: 'deduction', text: 'CROSS-REFERENCE: Study appears in BOTH of Lisa\'s showings' },
-        { type: 'deduction', text: 'T1 cards: Wrench, Study, Prof. Plum' },
-        { type: 'deduction', text: 'T3 cards: Mrs. Peacock, Study, Rope' },
-        { type: 'deduction', text: 'Only common card = Study → Lisa MUST have Study' },
-        { type: 'result', text: '→ ELIMINATED: Lisa has this card (confirmed by cross-reference)' }
-      ]
-    },
-  },
-  
-  constraints: [
-    { turn: 1, player: 'Lisa', cards: ['Wrench', 'Study', 'Prof. Plum'], action: 'showed' },
-    { turn: 2, player: 'Ann', cards: ['Lead Pipe', 'Kitchen', 'Miss Scarlet'], action: 'showed' },
-    { turn: 3, player: 'Lisa', cards: ['Mrs. Peacock', 'Study', 'Rope'], action: 'showed' },
-    { turn: 4, player: 'Ann', cards: ['Dining Room', 'Mr. Green', 'Candlestick'], action: 'showed' },
-    { turn: 5, player: 'Matthew', cards: ['Rope', 'Ballroom', 'Miss Scarlet'], action: 'showed' },
-    { turn: 6, player: 'Matthew', cards: ['Lounge', 'Prof. Plum', 'Revolver'], action: 'showed' },
-  ],
-  
-  insights: [
-    { type: 'deduction', text: 'Lisa has Study (cross-reference T1 & T3 constraints)', confidence: 100 },
-    { type: 'deduction', text: 'Lisa has Wrench (T1 constraint after Study eliminated)', confidence: 100 },
-    { type: 'inference', text: 'Candlestick likely in envelope — only 1 weak constraint in 7 turns', confidence: 67 },
-    { type: 'pattern', text: 'Conservatory never tested — highest probability untested room', confidence: 45 },
-  ]
+// ============================================================================
+// FIREBASE CONFIGURATION
+// ============================================================================
+// Firebase configuration for BoardBrain
+const firebaseConfig = {
+  apiKey: "AIzaSyBW2PAhPLH0BxCkVNy_cn8W5yvj5_8NWh4",
+  authDomain: "boardbrain-7580e.firebaseapp.com",
+  databaseURL: "https://boardbrain-7580e-default-rtdb.firebaseio.com",
+  projectId: "boardbrain-7580e",
+  storageBucket: "boardbrain-7580e.firebasestorage.app",
+  messagingSenderId: "563848678256",
+  appId: "1:563848678256:web:b48bcc5a6740788c5a9db5"
 };
 
-// Utility functions
-const getProbColor = (prob) => {
-  if (prob >= 60) return 'text-emerald-400';
-  if (prob >= 30) return 'text-amber-400';
-  if (prob > 0) return 'text-slate-300';
-  return 'text-slate-600';
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+
+// ============================================================================
+// GAME DATA
+// ============================================================================
+const CLUE_DATA = {
+  suspects: ['Colonel Mustard', 'Miss Scarlet', 'Professor Plum', 'Mr. Green', 'Mrs. White', 'Mrs. Peacock'],
+  weapons: ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'],
+  rooms: ['Kitchen', 'Ballroom', 'Conservatory', 'Dining Room', 'Billiard Room', 'Library', 'Lounge', 'Hall', 'Study']
 };
 
-const getBarColor = (prob) => {
-  if (prob >= 60) return 'bg-emerald-500';
-  if (prob >= 30) return 'bg-amber-500';
-  return 'bg-slate-500';
-};
+const ALL_CARDS = [...CLUE_DATA.suspects, ...CLUE_DATA.weapons, ...CLUE_DATA.rooms];
 
-const getEvidenceIcon = (type) => {
-  switch(type) {
-    case 'hand': return '🃏';
-    case 'shown': return '👁';
-    case 'constraint': return '🔗';
-    case 'deduction': return '🧠';
-    case 'analysis': return '📊';
-    case 'context': return '📋';
-    case 'calc': return '🎯';
-    case 'result': return '✓';
-    default: return '•';
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+const generateRoomCode = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed ambiguous chars
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
+  return code;
 };
 
-const getEvidenceStyle = (type) => {
-  switch(type) {
-    case 'result': return 'text-emerald-400 font-semibold';
-    case 'deduction': return 'text-purple-300';
-    case 'shown': return 'text-blue-300';
-    case 'calc': return 'text-amber-300 font-medium';
-    default: return 'text-slate-300';
-  }
-};
-
-// Evidence Panel Component (replaces tooltip)
-const EvidencePanel = ({ name, evidence, onClose }) => {
-  const panelRef = useRef(null);
+// ============================================================================
+// STYLES - Mobile-First, Dark Theme
+// ============================================================================
+const styles = {
+  // Base container - full viewport, dark theme
+  container: {
+    minHeight: '100vh',
+    backgroundColor: '#0f172a',
+    color: '#f1f5f9',
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    padding: '1rem',
+    boxSizing: 'border-box',
+  },
   
-  // Close on click outside
+  // Card container
+  card: {
+    backgroundColor: '#1e293b',
+    borderRadius: '0.75rem',
+    padding: '1.25rem',
+    marginBottom: '1rem',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
+  },
+  
+  // Header styling
+  header: {
+    textAlign: 'center',
+    marginBottom: '1.5rem',
+  },
+  
+  title: {
+    fontSize: '2rem',
+    fontWeight: '800',
+    background: 'linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    marginBottom: '0.25rem',
+  },
+  
+  subtitle: {
+    color: '#94a3b8',
+    fontSize: '0.875rem',
+  },
+  
+  // Room code display
+  roomCode: {
+    fontSize: '2.5rem',
+    fontWeight: '800',
+    letterSpacing: '0.25em',
+    color: '#fbbf24',
+    textAlign: 'center',
+    fontFamily: "'Courier New', monospace",
+    padding: '1rem',
+    backgroundColor: '#0f172a',
+    borderRadius: '0.5rem',
+    marginBottom: '1rem',
+  },
+  
+  // Buttons
+  button: {
+    width: '100%',
+    padding: '1rem 1.5rem',
+    borderRadius: '0.5rem',
+    border: 'none',
+    fontSize: '1rem',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    background: 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)',
+    color: 'white',
+    marginBottom: '0.75rem',
+  },
+  
+  buttonSecondary: {
+    background: 'transparent',
+    border: '2px solid #475569',
+    color: '#cbd5e1',
+  },
+  
+  buttonDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  
+  // Input fields
+  input: {
+    width: '100%',
+    padding: '0.875rem 1rem',
+    borderRadius: '0.5rem',
+    border: '2px solid #334155',
+    backgroundColor: '#0f172a',
+    color: '#f1f5f9',
+    fontSize: '1rem',
+    marginBottom: '0.75rem',
+    boxSizing: 'border-box',
+    outline: 'none',
+  },
+  
+  // Player list
+  playerChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '0.5rem 1rem',
+    borderRadius: '2rem',
+    backgroundColor: '#334155',
+    color: '#e2e8f0',
+    fontSize: '0.875rem',
+    marginRight: '0.5rem',
+    marginBottom: '0.5rem',
+  },
+  
+  // Turn indicator
+  turnIndicator: {
+    padding: '0.75rem 1rem',
+    borderRadius: '0.5rem',
+    textAlign: 'center',
+    fontWeight: '600',
+    marginBottom: '1rem',
+  },
+  
+  myTurn: {
+    backgroundColor: '#166534',
+    border: '2px solid #22c55e',
+    color: '#bbf7d0',
+  },
+  
+  notMyTurn: {
+    backgroundColor: '#1e293b',
+    border: '2px solid #475569',
+    color: '#94a3b8',
+  },
+  
+  // Matrix table - optimized for mobile
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '0.75rem',
+  },
+  
+  th: {
+    padding: '0.5rem 0.25rem',
+    textAlign: 'center',
+    color: '#94a3b8',
+    fontWeight: '600',
+    borderBottom: '2px solid #334155',
+    whiteSpace: 'nowrap',
+  },
+  
+  td: {
+    padding: '0.375rem 0.25rem',
+    textAlign: 'center',
+    borderBottom: '1px solid #1e293b',
+  },
+  
+  // Card selection chips
+  cardChip: {
+    display: 'inline-block',
+    padding: '0.5rem 0.75rem',
+    borderRadius: '0.375rem',
+    fontSize: '0.875rem',
+    margin: '0.25rem',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    border: '2px solid transparent',
+  },
+  
+  cardChipSelected: {
+    backgroundColor: '#8b5cf6',
+    color: 'white',
+    border: '2px solid #a78bfa',
+  },
+  
+  cardChipUnselected: {
+    backgroundColor: '#334155',
+    color: '#cbd5e1',
+    border: '2px solid #475569',
+  },
+};
+
+// ============================================================================
+// MAIN APP COMPONENT
+// ============================================================================
+export default function BoardBrain() {
+  // -------------------------------------------------------------------------
+  // APP STATE
+  // -------------------------------------------------------------------------
+  const [appPhase, setAppPhase] = useState('welcome'); // welcome, createRoom, joinRoom, lobby, playing
+  const [roomCode, setRoomCode] = useState('');
+  const [playerId, setPlayerId] = useState('');
+  const [playerName, setPlayerName] = useState('');
+  const [isHost, setIsHost] = useState(false);
+  
+  // -------------------------------------------------------------------------
+  // GAME STATE (synced from Firebase)
+  // -------------------------------------------------------------------------
+  const [gameState, setGameState] = useState(null);
+  const [myPrivateData, setMyPrivateData] = useState(null);
+  
+  // -------------------------------------------------------------------------
+  // LOCAL UI STATE
+  // -------------------------------------------------------------------------
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [selectedCharacter, setSelectedCharacter] = useState('');
+  const [selectedCards, setSelectedCards] = useState([]);
+  const [error, setError] = useState('');
+  
+  // -------------------------------------------------------------------------
+  // FIREBASE LISTENERS
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (panelRef.current && !panelRef.current.contains(event.target)) {
-        onClose();
+    if (!roomCode) return;
+    
+    // Listen to shared game state
+    const gameRef = ref(database, `rooms/${roomCode}/game`);
+    const unsubGame = onValue(gameRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setGameState(data);
       }
-    };
-    
-    // Add listener after a small delay to avoid immediate close
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [onClose]);
-  
-  // Close on Escape key
-  useEffect(() => {
-    const handleEscape = (event) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
-  
-  return (
-    <div 
-      ref={panelRef}
-      className="absolute z-50 right-0 top-full mt-2 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-2xl overflow-hidden"
-    >
-      {/* Header */}
-      <div className="bg-slate-700 px-4 py-2 flex items-center justify-between">
-        <div className="font-semibold text-white text-sm">{name}</div>
-        <button 
-          onClick={onClose}
-          className="text-slate-400 hover:text-white text-xl leading-none px-1"
-        >
-          ×
-        </button>
-      </div>
-      
-      {/* Evidence list */}
-      <div className="p-3 max-h-64 overflow-y-auto space-y-2">
-        <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">
-          Evidence Trail
-        </div>
-        {evidence.map((e, i) => (
-          <div key={i} className="flex items-start gap-2 text-sm">
-            <span className="text-base flex-shrink-0 mt-0.5">{getEvidenceIcon(e.type)}</span>
-            <span className={getEvidenceStyle(e.type)}>{e.text}</span>
-          </div>
-        ))}
-      </div>
-      
-      {/* Footer hint */}
-      <div className="bg-slate-900/50 px-3 py-2 text-[10px] text-slate-500 border-t border-slate-700">
-        Click outside or press Esc to close
-      </div>
-    </div>
-  );
-};
-
-// Horizontal Bar Chart Component with Evidence
-const ProbabilityChart = ({ title, icon, data, accentColor }) => {
-  const [openEvidence, setOpenEvidence] = useState(null);
-  
-  const sortedData = useMemo(() => {
-    return Object.entries(data)
-      .sort((a, b) => {
-        // Sort: active cards by prob desc, then eliminated, then mine
-        if (a[1].status === 'mine' && b[1].status !== 'mine') return 1;
-        if (b[1].status === 'mine' && a[1].status !== 'mine') return -1;
-        if (a[1].status === 'eliminated' && b[1].status !== 'eliminated') return 1;
-        if (b[1].status === 'eliminated' && a[1].status !== 'eliminated') return -1;
-        return b[1].prob - a[1].prob;
-      });
-  }, [data]);
-  
-  const topCandidate = sortedData.find(([_, v]) => v.status !== 'mine' && v.status !== 'eliminated');
-  
-  return (
-    <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-      {/* Header */}
-      <div className={`px-4 py-2 border-b border-slate-700/50 flex items-center justify-between ${accentColor}`}>
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{icon}</span>
-          <span className="font-semibold text-sm tracking-wide uppercase">{title}</span>
-        </div>
-        {topCandidate && (
-          <span className="text-xs bg-black/30 px-2 py-0.5 rounded">
-            TOP: {topCandidate[0]}
-          </span>
-        )}
-      </div>
-      
-      {/* Bars */}
-      <div className="p-3 space-y-1.5">
-        {sortedData.map(([name, info]) => {
-          const isEliminated = info.status === 'eliminated';
-          const isMine = info.status === 'mine';
-          const showBar = !isEliminated && !isMine;
-          
-          return (
-            <div key={name} className="flex items-center gap-2 group relative">
-              {/* Name */}
-              <div className={`w-28 text-xs truncate font-medium
-                ${isMine ? 'text-blue-400' : isEliminated ? 'text-red-400 line-through' : 'text-slate-200'}`}
-              >
-                {name}
-              </div>
-              
-              {/* Bar container or status text */}
-              <div className="flex-1 h-6 relative">
-                {showBar ? (
-                  <div className="h-full bg-slate-800/50 rounded overflow-hidden">
-                    <div 
-                      className={`h-full ${getBarColor(info.prob)} transition-all duration-500`}
-                      style={{ width: `${Math.max(info.prob, 3)}%` }}
-                    />
-                  </div>
-                ) : (
-                  <div className={`h-full flex items-center text-xs font-medium
-                    ${isMine ? 'text-blue-400/70' : 'text-red-400/70'}`}
-                  >
-                    {isMine ? '— MY CARD —' : '— ELIMINATED —'}
-                  </div>
-                )}
-              </div>
-              
-              {/* Percentage */}
-              <div className={`w-12 text-right text-sm font-mono font-bold ${getProbColor(info.prob)}`}>
-                {info.prob > 0 ? `${info.prob}%` : '—'}
-              </div>
-              
-              {/* Evidence info icon */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpenEvidence(openEvidence === name ? null : name);
-                }}
-                className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors text-sm
-                  ${openEvidence === name 
-                    ? 'bg-purple-600 text-white' 
-                    : 'bg-slate-700/50 hover:bg-slate-600 text-slate-400 hover:text-white'}`}
-                title="View evidence"
-              >
-                ℹ
-              </button>
-              
-              {/* Evidence panel */}
-              {openEvidence === name && (
-                <EvidencePanel 
-                  name={name}
-                  evidence={info.evidence} 
-                  onClose={() => setOpenEvidence(null)}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-// Solution Candidates Panel
-const SolutionCandidates = ({ suspects, weapons, rooms }) => {
-  const getTopCandidate = (data) => {
-    const candidates = Object.entries(data)
-      .filter(([_, v]) => v.status !== 'mine' && v.status !== 'eliminated')
-      .sort((a, b) => b[1].prob - a[1].prob);
-    return candidates[0] || null;
-  };
-  
-  const topSuspect = getTopCandidate(suspects);
-  const topWeapon = getTopCandidate(weapons);
-  const topRoom = getTopCandidate(rooms);
-  
-  const overallConfidence = useMemo(() => {
-    if (!topSuspect || !topWeapon || !topRoom) return 0;
-    return Math.round((topSuspect[1].prob + topWeapon[1].prob + topRoom[1].prob) / 3);
-  }, [topSuspect, topWeapon, topRoom]);
-  
-  const getConfidenceLevel = (conf) => {
-    if (conf >= 70) return { label: 'HIGH', color: 'text-emerald-400', bg: 'bg-emerald-500', glow: 'shadow-emerald-500/30' };
-    if (conf >= 45) return { label: 'MEDIUM', color: 'text-amber-400', bg: 'bg-amber-500', glow: 'shadow-amber-500/30' };
-    return { label: 'LOW', color: 'text-slate-400', bg: 'bg-slate-500', glow: '' };
-  };
-  
-  const confLevel = getConfidenceLevel(overallConfidence);
-  
-  return (
-    <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 rounded-xl border border-slate-700/50 overflow-hidden">
-      {/* Header with confidence meter */}
-      <div className="px-5 py-4 border-b border-slate-700/50 bg-black/20">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-            <span className="text-2xl">🎯</span>
-            SOLUTION CANDIDATES
-          </h2>
-          <div className={`px-3 py-1 rounded-full text-xs font-bold ${confLevel.color} bg-black/40 border border-current/30`}>
-            {confLevel.label} CONFIDENCE
-          </div>
-        </div>
-        
-        {/* Confidence bar */}
-        <div className="relative h-3 bg-slate-800 rounded-full overflow-hidden">
-          <div 
-            className={`h-full ${confLevel.bg} transition-all duration-700 ${confLevel.glow} shadow-lg`}
-            style={{ width: `${overallConfidence}%` }}
-          />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[10px] font-bold text-white drop-shadow-lg">{overallConfidence}%</span>
-          </div>
-        </div>
-      </div>
-      
-      {/* Three candidates */}
-      <div className="grid grid-cols-3 divide-x divide-slate-700/50">
-        {/* Suspect */}
-        <div className="p-4 text-center">
-          <div className="text-3xl mb-2">🕵️</div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">WHO</div>
-          <div className="text-sm font-semibold text-white mb-1">
-            {topSuspect ? topSuspect[0] : '???'}
-          </div>
-          <div className={`text-2xl font-bold font-mono ${topSuspect ? getProbColor(topSuspect[1].prob) : 'text-slate-600'}`}>
-            {topSuspect ? `${topSuspect[1].prob}%` : '—'}
-          </div>
-        </div>
-        
-        {/* Weapon */}
-        <div className="p-4 text-center">
-          <div className="text-3xl mb-2">🔪</div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">WHAT</div>
-          <div className="text-sm font-semibold text-white mb-1">
-            {topWeapon ? topWeapon[0] : '???'}
-          </div>
-          <div className={`text-2xl font-bold font-mono ${topWeapon ? getProbColor(topWeapon[1].prob) : 'text-slate-600'}`}>
-            {topWeapon ? `${topWeapon[1].prob}%` : '—'}
-          </div>
-        </div>
-        
-        {/* Room */}
-        <div className="p-4 text-center">
-          <div className="text-3xl mb-2">🚪</div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">WHERE</div>
-          <div className="text-sm font-semibold text-white mb-1">
-            {topRoom ? topRoom[0] : '???'}
-          </div>
-          <div className={`text-2xl font-bold font-mono ${topRoom ? getProbColor(topRoom[1].prob) : 'text-slate-600'}`}>
-            {topRoom ? `${topRoom[1].prob}%` : '—'}
-          </div>
-        </div>
-      </div>
-      
-      {/* Accusation readiness */}
-      {overallConfidence >= 70 && (
-        <div className="px-4 py-3 bg-emerald-900/30 border-t border-emerald-500/30">
-          <div className="flex items-center gap-2 text-emerald-300 text-sm">
-            <span className="animate-pulse">⚡</span>
-            <span className="font-semibold">Ready to accuse!</span>
-            <span className="text-emerald-400/70 text-xs">— High confidence in all three categories</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Recommendations & Alerts Panel
-const RecommendationsAlerts = ({ turn, insights, constraints, suspects, weapons, rooms }) => {
-  const recommendations = useMemo(() => {
-    const recs = [];
-    
-    const suspectCandidates = Object.entries(suspects).filter(([_, v]) => v.status === 'possible' || v.status === 'likely');
-    const weaponCandidates = Object.entries(weapons).filter(([_, v]) => v.status === 'possible' || v.status === 'likely');
-    const roomCandidates = Object.entries(rooms).filter(([_, v]) => v.status === 'possible' || v.status === 'likely');
-    
-    if (suspectCandidates.length > 0 && weaponCandidates.length > 0 && roomCandidates.length > 0) {
-      const topS = suspectCandidates.sort((a, b) => b[1].prob - a[1].prob)[0];
-      const topW = weaponCandidates.sort((a, b) => b[1].prob - a[1].prob)[0];
-      const topR = roomCandidates.sort((a, b) => b[1].prob - a[1].prob)[0];
-      
-      recs.push({
-        type: 'suggest',
-        priority: 'high',
-        text: `Suggest: ${topS[0]}, ${topW[0]}, ${topR[0]}`,
-        subtext: 'Tests your top candidates simultaneously',
-        icon: '💡'
-      });
-    }
-    
-    const recentShowers = constraints.slice(-3).map(c => c.player);
-    const players = ['Lisa', 'Matthew', 'Ann'];
-    const quietPlayers = players.filter(p => !recentShowers.includes(p));
-    
-    if (quietPlayers.length > 0) {
-      recs.push({
-        type: 'strategy',
-        priority: 'medium',
-        text: `Target ${quietPlayers[0]} with your next suggestion`,
-        subtext: `Haven't shown in 3 turns — may have limited cards`,
-        icon: '🎯'
-      });
-    }
-    
-    const likelyRooms = Object.entries(rooms).filter(([_, v]) => v.status === 'likely');
-    if (likelyRooms.length > 0) {
-      recs.push({
-        type: 'move',
-        priority: 'medium',
-        text: `Move toward ${likelyRooms[0][0]}`,
-        subtext: 'High-probability room for final accusation',
-        icon: '🚶'
-      });
-    }
-    
-    return recs;
-  }, [suspects, weapons, rooms, constraints]);
-  
-  const alerts = useMemo(() => {
-    const alertList = [];
-    
-    const topSuspect = Object.entries(suspects).find(([_, v]) => v.prob >= 60 && v.status !== 'mine');
-    const topWeapon = Object.entries(weapons).find(([_, v]) => v.prob >= 60 && v.status !== 'mine');
-    const topRoom = Object.entries(rooms).find(([_, v]) => v.prob >= 60 && v.status !== 'mine');
-    
-    if (topSuspect && topWeapon && topRoom) {
-      alertList.push({
-        type: 'success',
-        text: 'Solution convergence detected',
-        subtext: 'All three categories have clear leaders',
-        icon: '✓'
-      });
-    }
-    
-    if (turn >= 6) {
-      alertList.push({
-        type: 'warning',
-        text: 'Game entering late phase',
-        subtext: 'Other players may be close to solving',
-        icon: '⚠'
-      });
-    }
-    
-    const breakthroughs = insights.filter(i => i.confidence >= 90);
-    if (breakthroughs.length > 0) {
-      alertList.push({
-        type: 'info',
-        text: `${breakthroughs.length} confirmed deduction${breakthroughs.length > 1 ? 's' : ''}`,
-        subtext: 'High-confidence eliminations made',
-        icon: 'ℹ'
-      });
-    }
-    
-    return alertList;
-  }, [suspects, weapons, rooms, turn, insights]);
-  
-  const getPriorityStyle = (priority) => {
-    switch(priority) {
-      case 'high': return 'border-l-emerald-400 bg-emerald-900/20';
-      case 'medium': return 'border-l-amber-400 bg-amber-900/20';
-      default: return 'border-l-slate-400 bg-slate-800/50';
-    }
-  };
-  
-  const getAlertStyle = (type) => {
-    switch(type) {
-      case 'success': return 'border-emerald-500/50 bg-emerald-900/30 text-emerald-300';
-      case 'warning': return 'border-amber-500/50 bg-amber-900/30 text-amber-300';
-      case 'info': return 'border-blue-500/50 bg-blue-900/30 text-blue-300';
-      default: return 'border-slate-500/50 bg-slate-800/50 text-slate-300';
-    }
-  };
-  
-  return (
-    <div className="space-y-4">
-      {/* Recommendations */}
-      <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-700/50 bg-emerald-900/20">
-          <h3 className="font-semibold text-sm text-emerald-300 flex items-center gap-2">
-            <span>💡</span> RECOMMENDATIONS
-          </h3>
-        </div>
-        <div className="p-3 space-y-2">
-          {recommendations.map((rec, i) => (
-            <div 
-              key={i} 
-              className={`border-l-2 pl-3 py-2 rounded-r ${getPriorityStyle(rec.priority)}`}
-            >
-              <div className="flex items-start gap-2">
-                <span className="text-lg">{rec.icon}</span>
-                <div>
-                  <div className="text-sm font-medium text-white">{rec.text}</div>
-                  <div className="text-xs text-slate-400">{rec.subtext}</div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      {/* Alerts */}
-      <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-700/50 bg-amber-900/20">
-          <h3 className="font-semibold text-sm text-amber-300 flex items-center gap-2">
-            <span>🔔</span> ALERTS
-          </h3>
-        </div>
-        <div className="p-3 space-y-2">
-          {alerts.map((alert, i) => (
-            <div 
-              key={i} 
-              className={`flex items-center gap-3 px-3 py-2 rounded border ${getAlertStyle(alert.type)}`}
-            >
-              <span className="text-lg w-6 text-center">{alert.icon}</span>
-              <div>
-                <div className="text-sm font-medium">{alert.text}</div>
-                <div className="text-xs opacity-70">{alert.subtext}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      {/* Recent Insights */}
-      <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-700/50 bg-purple-900/20">
-          <h3 className="font-semibold text-sm text-purple-300 flex items-center gap-2">
-            <span>🧠</span> RECENT INSIGHTS
-          </h3>
-        </div>
-        <div className="p-3 space-y-2">
-          {insights.map((insight, i) => (
-            <div 
-              key={i} 
-              className="flex items-start gap-3 px-3 py-2 rounded bg-slate-800/50 border border-slate-700/30"
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
-                ${insight.confidence >= 90 ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-500/50' :
-                  insight.confidence >= 60 ? 'bg-amber-900/50 text-amber-400 border border-amber-500/50' :
-                  'bg-slate-700/50 text-slate-400 border border-slate-600/50'}`}
-              >
-                {insight.confidence}
-              </div>
-              <div className="flex-1">
-                <div className="text-sm text-slate-200">{insight.text}</div>
-                <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-1">{insight.type}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// My Cards & Public Cards Display
-const MyCardsAndPublic = ({ myCards, publicCards }) => {
-  return (
-    <div className="bg-slate-900/80 rounded-lg border border-blue-500/30 overflow-hidden">
-      <div className="px-4 py-2 border-b border-blue-500/30 bg-blue-900/30">
-        <h3 className="font-semibold text-sm text-blue-300 flex items-center gap-2">
-          <span>🃏</span> MY CARDS / PUBLIC CARDS
-        </h3>
-      </div>
-      <div className="p-3">
-        {/* My Cards */}
-        <div className="flex flex-wrap gap-2 mb-3">
-          {myCards.map(card => (
-            <span 
-              key={card}
-              className="px-3 py-1.5 bg-blue-900/40 border border-blue-500/40 rounded-full text-xs text-blue-200 font-medium"
-            >
-              {card}
-            </span>
-          ))}
-        </div>
-        
-        {/* Public Cards */}
-        {publicCards && publicCards.length > 0 && (
-          <>
-            <div className="border-t border-slate-700/50 pt-3">
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">
-                Public (Everyone Knows)
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {publicCards.map(card => (
-                  <span 
-                    key={card}
-                    className="px-3 py-1.5 bg-slate-700/40 border border-slate-500/40 rounded-full text-xs text-slate-300 font-medium"
-                  >
-                    {card}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Turn Sequence Display Component
-const TurnSequence = ({ players, characters, currentPlayerIndex, playerLocations, turnHistory }) => {
-  return (
-    <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-700/50 bg-cyan-900/20">
-        <h3 className="font-semibold text-sm text-cyan-300 flex items-center gap-2">
-          <span>🔄</span> TURN SEQUENCE
-        </h3>
-      </div>
-      <div className="p-3">
-        <div className="flex flex-wrap gap-2">
-          {players.map((player, idx) => {
-            const isCurrent = idx === currentPlayerIndex;
-            const location = playerLocations[player];
-            const isYou = player === 'You';
-            
-            return (
-              <div 
-                key={idx}
-                className={`flex-1 min-w-[120px] p-2 rounded-lg border transition-all
-                  ${isCurrent 
-                    ? 'bg-cyan-900/40 border-cyan-500/50 ring-2 ring-cyan-500/30' 
-                    : 'bg-slate-800/50 border-slate-700/50'}`}
-              >
-                {/* Turn indicator */}
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-[10px] font-bold ${isCurrent ? 'text-cyan-400' : 'text-slate-500'}`}>
-                    {isCurrent ? '▶ NOW' : `#${idx + 1}`}
-                  </span>
-                  {isYou && (
-                    <span className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 rounded">YOU</span>
-                  )}
-                </div>
-                
-                {/* Player name */}
-                <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-white' : 'text-slate-300'}`}>
-                  {player}
-                </div>
-                
-                {/* Character */}
-                <div className="text-[10px] text-slate-500 truncate">
-                  {characters[player] || 'No character'}
-                </div>
-                
-                {/* Location */}
-                {location && (
-                  <div className="text-[10px] text-amber-400 mt-1 truncate">
-                    📍 {location}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Turn Input Component
-const TurnInput = ({ players, turn, currentPlayerIndex, onLogTurn }) => {
-  const [suggestion, setSuggestion] = useState({ suspect: '', weapon: '', room: '' });
-  const [responses, setResponses] = useState([]);
-  const [responseStep, setResponseStep] = useState(0);
-  const [showCardSelect, setShowCardSelect] = useState(false);
-  const [selectedCard, setSelectedCard] = useState('');
-  
-  const SUSPECTS = ['Colonel Mustard', 'Miss Scarlet', 'Professor Plum', 'Mr. Green', 'Mrs. White', 'Mrs. Peacock'];
-  const WEAPONS = ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'];
-  const ROOMS = ['Kitchen', 'Ballroom', 'Conservatory', 'Dining Room', 'Billiard Room', 'Library', 'Lounge', 'Hall', 'Study'];
-  
-  const currentPlayer = players[currentPlayerIndex];
-  const isMyTurn = currentPlayer === 'You';
-  
-  // Get players in clockwise order starting after current player
-  const getRespondingPlayers = () => {
-    const order = [];
-    for (let i = 1; i < players.length; i++) {
-      const idx = (currentPlayerIndex + i) % players.length;
-      order.push({ index: idx, name: players[idx] });
-    }
-    return order;
-  };
-  
-  const respondingPlayers = getRespondingPlayers();
-  const suggestionComplete = suggestion.suspect && suggestion.weapon && suggestion.room;
-  const currentResponder = respondingPlayers[responseStep];
-  
-  const handlePass = () => {
-    const newResponses = [...responses, { 
-      player: currentResponder.name, 
-      playerIndex: currentResponder.index,
-      action: 'pass' 
-    }];
-    setResponses(newResponses);
-    
-    if (responseStep < respondingPlayers.length - 1) {
-      setResponseStep(responseStep + 1);
-    } else {
-      // All players passed - no one had a card
-      finalizeTurn(newResponses);
-    }
-  };
-  
-  const handleShow = () => {
-    // If I made the suggestion, I see the card shown to me
-    if (isMyTurn) {
-      setShowCardSelect(true);
-    } else {
-      // Someone else made suggestion, they see the card (not me)
-      const newResponses = [...responses, {
-        player: currentResponder.name,
-        playerIndex: currentResponder.index,
-        action: 'show',
-        cardShown: null // Unknown to me
-      }];
-      finalizeTurn(newResponses);
-    }
-  };
-  
-  const handleCardSelected = (card) => {
-    const newResponses = [...responses, {
-      player: currentResponder.name,
-      playerIndex: currentResponder.index,
-      action: 'show',
-      cardShown: card // I saw this card
-    }];
-    setSelectedCard('');
-    setShowCardSelect(false);
-    finalizeTurn(newResponses);
-  };
-  
-  const finalizeTurn = (finalResponses) => {
-    onLogTurn({
-      turn: turn,
-      player: currentPlayer,
-      playerIndex: currentPlayerIndex,
-      suggestion: { ...suggestion },
-      room: suggestion.room, // Where player moved to
-      responses: finalResponses
     });
     
-    // Reset for next turn
-    setSuggestion({ suspect: '', weapon: '', room: '' });
-    setResponses([]);
-    setResponseStep(0);
-    setShowCardSelect(false);
-  };
-  
-  const resetTurn = () => {
-    setSuggestion({ suspect: '', weapon: '', room: '' });
-    setResponses([]);
-    setResponseStep(0);
-    setShowCardSelect(false);
-  };
-  
-  return (
-    <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-700/50 bg-indigo-900/30">
-        <h3 className="font-semibold text-sm text-indigo-300 flex items-center gap-2">
-          <span>📝</span> LOG TURN {turn}
-        </h3>
-      </div>
+    // Listen to my private data
+    if (playerId) {
+      const privateRef = ref(database, `rooms/${roomCode}/private/${playerId}`);
+      const unsubPrivate = onValue(privateRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          setMyPrivateData(data);
+        }
+      });
       
-      <div className="p-4 space-y-4">
-        {/* Current Player Display */}
-        <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold
-            ${isMyTurn ? 'bg-blue-900 text-blue-300' : 'bg-indigo-900 text-indigo-300'}`}>
-            {currentPlayerIndex + 1}
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-white">
-              {currentPlayer}'s Turn
-              {isMyTurn && <span className="ml-2 text-blue-400">(Your turn!)</span>}
-            </div>
-            <div className="text-xs text-slate-400">
-              Select room and make suggestion
-            </div>
-          </div>
-        </div>
-        
-        {/* Suggestion */}
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wider block mb-2">
-              Suspect
-            </label>
-            <select
-              value={suggestion.suspect}
-              onChange={(e) => setSuggestion({ ...suggestion, suspect: e.target.value })}
-              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white"
-            >
-              <option value="">Select...</option>
-              {SUSPECTS.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wider block mb-2">
-              Weapon
-            </label>
-            <select
-              value={suggestion.weapon}
-              onChange={(e) => setSuggestion({ ...suggestion, weapon: e.target.value })}
-              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white"
-            >
-              <option value="">Select...</option>
-              {WEAPONS.map(w => (
-                <option key={w} value={w}>{w}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-amber-400 uppercase tracking-wider block mb-2">
-              Room (moved to)
-            </label>
-            <select
-              value={suggestion.room}
-              onChange={(e) => setSuggestion({ ...suggestion, room: e.target.value })}
-              className="w-full bg-slate-800 border border-amber-600/50 rounded px-2 py-1.5 text-sm text-white"
-            >
-              <option value="">Select...</option>
-              {ROOMS.map(r => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        
-        {/* Response Recording */}
-        {suggestionComplete && (
-          <div className="border-t border-slate-700 pt-4">
-            <div className="text-xs text-slate-400 uppercase tracking-wider mb-3">
-              Responses (clockwise from {currentPlayer})
-            </div>
-            
-            {/* Show recorded responses */}
-            {responses.length > 0 && (
-              <div className="space-y-1 mb-3">
-                {responses.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    <span className="text-slate-400">{r.player}:</span>
-                    <span className={r.action === 'pass' ? 'text-red-400' : 'text-green-400'}>
-                      {r.action === 'pass' ? 'PASS' : 'SHOWED'}
-                      {r.cardShown && <span className="text-blue-300 ml-1">({r.cardShown})</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Current responder */}
-            {responseStep < respondingPlayers.length && !showCardSelect && (
-              <div className="bg-slate-800/50 rounded-lg p-3">
-                <div className="text-sm text-white mb-3">
-                  <span className="font-semibold">{currentResponder.name}</span>'s response:
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handlePass}
-                    className="flex-1 px-4 py-2 bg-red-900/50 hover:bg-red-800/50 border border-red-500/50 rounded text-red-300 text-sm font-medium transition-colors"
-                  >
-                    PASS
-                  </button>
-                  <button
-                    onClick={handleShow}
-                    className="flex-1 px-4 py-2 bg-green-900/50 hover:bg-green-800/50 border border-green-500/50 rounded text-green-300 text-sm font-medium transition-colors"
-                  >
-                    SHOWED
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* Card selection (when shown to me) */}
-            {showCardSelect && (
-              <div className="bg-slate-800/50 rounded-lg p-3">
-                <div className="text-sm text-white mb-3">
-                  {currentResponder.name} showed you which card?
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {[suggestion.suspect, suggestion.weapon, suggestion.room].map(card => (
-                    <button
-                      key={card}
-                      onClick={() => handleCardSelected(card)}
-                      className="px-3 py-1.5 bg-blue-900/50 hover:bg-blue-800/50 border border-blue-500/50 rounded text-blue-300 text-sm font-medium transition-colors"
-                    >
-                      {card}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Game History Component
-const GameHistory = ({ history }) => {
-  if (history.length === 0) {
+      return () => {
+        unsubGame();
+        unsubPrivate();
+      };
+    }
+    
+    return () => unsubGame();
+  }, [roomCode, playerId]);
+  
+  // -------------------------------------------------------------------------
+  // ROOM MANAGEMENT
+  // -------------------------------------------------------------------------
+  const createRoom = async () => {
+    if (!nameInput.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+    
+    const code = generateRoomCode();
+    const newPlayerId = `player_${Date.now()}`;
+    
+    // Initialize room in Firebase
+    const roomRef = ref(database, `rooms/${code}`);
+    await set(roomRef, {
+      game: {
+        phase: 'lobby',
+        hostId: newPlayerId,
+        players: {
+          [newPlayerId]: {
+            id: newPlayerId,
+            name: nameInput.trim(),
+            character: null,
+            isReady: false,
+            joinedAt: Date.now(),
+          }
+        },
+        settings: {
+          numPlayers: null,
+        },
+        currentTurn: 0,
+        currentPlayerIndex: 0,
+        moves: [],
+        publicCards: [],
+        createdAt: Date.now(),
+      },
+      private: {
+        [newPlayerId]: {
+          cards: [],
+          shownToMe: [], // Cards other players have shown me privately
+          knowledgeMatrix: {},
+        }
+      }
+    });
+    
+    setRoomCode(code);
+    setPlayerId(newPlayerId);
+    setPlayerName(nameInput.trim());
+    setIsHost(true);
+    setAppPhase('lobby');
+    setError('');
+  };
+  
+  const joinRoom = async () => {
+    if (!nameInput.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+    if (!joinCodeInput.trim() || joinCodeInput.length !== 6) {
+      setError('Please enter a valid 6-character room code');
+      return;
+    }
+    
+    const code = joinCodeInput.toUpperCase().trim();
+    
+    // Check if room exists
+    const roomRef = ref(database, `rooms/${code}/game`);
+    const snapshot = await get(roomRef);
+    
+    if (!snapshot.exists()) {
+      setError('Room not found. Check the code and try again.');
+      return;
+    }
+    
+    const roomData = snapshot.val();
+    
+    if (roomData.phase !== 'lobby') {
+      setError('Game has already started. Cannot join.');
+      return;
+    }
+    
+    // Add player to room
+    const newPlayerId = `player_${Date.now()}`;
+    
+    await update(ref(database, `rooms/${code}/game/players`), {
+      [newPlayerId]: {
+        id: newPlayerId,
+        name: nameInput.trim(),
+        character: null,
+        isReady: false,
+        joinedAt: Date.now(),
+      }
+    });
+    
+    // Initialize private data for this player
+    await set(ref(database, `rooms/${code}/private/${newPlayerId}`), {
+      cards: [],
+      shownToMe: [],
+      knowledgeMatrix: {},
+    });
+    
+    setRoomCode(code);
+    setPlayerId(newPlayerId);
+    setPlayerName(nameInput.trim());
+    setIsHost(false);
+    setAppPhase('lobby');
+    setError('');
+  };
+  
+  // -------------------------------------------------------------------------
+  // CHARACTER & CARD SELECTION
+  // -------------------------------------------------------------------------
+  const selectCharacter = async (character) => {
+    if (!roomCode || !playerId) return;
+    
+    // Check if character is taken
+    const players = gameState?.players || {};
+    const taken = Object.values(players).some(p => p.character === character && p.id !== playerId);
+    if (taken) {
+      setError(`${character} is already taken`);
+      return;
+    }
+    
+    await update(ref(database, `rooms/${roomCode}/game/players/${playerId}`), {
+      character: character,
+    });
+    
+    setSelectedCharacter(character);
+    setError('');
+  };
+  
+  const toggleCard = (card) => {
+    const numPlayers = Object.keys(gameState?.players || {}).length;
+    const cardsPerPlayer = Math.floor(18 / numPlayers);
+    
+    setSelectedCards(prev => {
+      if (prev.includes(card)) {
+        return prev.filter(c => c !== card);
+      } else if (prev.length < cardsPerPlayer) {
+        return [...prev, card];
+      }
+      return prev;
+    });
+  };
+  
+  const confirmCards = async () => {
+    if (!roomCode || !playerId) return;
+    
+    // Save my cards privately
+    await update(ref(database, `rooms/${roomCode}/private/${playerId}`), {
+      cards: selectedCards,
+    });
+    
+    // Mark myself as ready
+    await update(ref(database, `rooms/${roomCode}/game/players/${playerId}`), {
+      isReady: true,
+    });
+  };
+  
+  // -------------------------------------------------------------------------
+  // GAME ACTIONS
+  // -------------------------------------------------------------------------
+  const startGame = async () => {
+    if (!isHost || !roomCode) return;
+    
+    const players = gameState?.players || {};
+    const allReady = Object.values(players).every(p => p.isReady);
+    
+    if (!allReady) {
+      setError('All players must select their cards first');
+      return;
+    }
+    
+    // Determine turn order (by character or join order)
+    const playerList = Object.values(players).sort((a, b) => a.joinedAt - b.joinedAt);
+    
+    await update(ref(database, `rooms/${roomCode}/game`), {
+      phase: 'playing',
+      currentTurn: 1,
+      currentPlayerIndex: 0,
+      turnOrder: playerList.map(p => p.id),
+    });
+  };
+  
+  const submitSuggestion = async (suspect, weapon, room) => {
+    if (!roomCode || !playerId) return;
+    
+    const newMove = {
+      id: `move_${Date.now()}`,
+      turn: gameState.currentTurn,
+      suggesterId: playerId,
+      suggesterName: playerName,
+      suspect,
+      weapon,
+      room,
+      responses: {},
+      resolved: false,
+      timestamp: Date.now(),
+    };
+    
+    // Add move to game state
+    await update(ref(database, `rooms/${roomCode}/game`), {
+      currentMove: newMove,
+      awaitingResponse: true,
+    });
+  };
+  
+  const respondToSuggestion = async (response, cardShown = null) => {
+    if (!roomCode || !playerId || !gameState?.currentMove) return;
+    
+    const currentMove = gameState.currentMove;
+    
+    // Update response
+    const updates = {
+      [`rooms/${roomCode}/game/currentMove/responses/${playerId}`]: {
+        response, // 'passed' or 'showed'
+        cardShown: cardShown, // Only stored privately for suggester
+      }
+    };
+    
+    // If showing a card, update suggester's private knowledge
+    if (response === 'showed' && cardShown) {
+      updates[`rooms/${roomCode}/private/${currentMove.suggesterId}/shownToMe`] = 
+        [...(myPrivateData?.shownToMe || []), {
+          card: cardShown,
+          shownBy: playerId,
+          turn: gameState.currentTurn,
+        }];
+    }
+    
+    await update(ref(database), updates);
+  };
+  
+  const advanceTurn = async () => {
+    if (!isHost || !roomCode) return;
+    
+    const turnOrder = gameState.turnOrder || [];
+    const nextIndex = (gameState.currentPlayerIndex + 1) % turnOrder.length;
+    
+    // Archive current move to moves array
+    const currentMove = gameState.currentMove;
+    const moves = gameState.moves || [];
+    
+    await update(ref(database, `rooms/${roomCode}/game`), {
+      currentTurn: gameState.currentTurn + 1,
+      currentPlayerIndex: nextIndex,
+      currentMove: null,
+      awaitingResponse: false,
+      moves: currentMove ? [...moves, currentMove] : moves,
+    });
+  };
+  
+  // -------------------------------------------------------------------------
+  // RENDER: WELCOME SCREEN
+  // -------------------------------------------------------------------------
+  if (appPhase === 'welcome') {
     return (
-      <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-700/50 bg-slate-800/50">
-          <h3 className="font-semibold text-sm text-slate-300 flex items-center gap-2">
-            <span>📜</span> TURN HISTORY
-          </h3>
-        </div>
-        <div className="p-4 text-center text-slate-500 text-sm">
-          No turns logged yet
+      <div style={styles.container}>
+        <div style={{ maxWidth: '28rem', margin: '0 auto', paddingTop: '2rem' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>More Brain. Better Game.</p>
+          </div>
+          
+          <div style={styles.card}>
+            <p style={{ color: '#cbd5e1', marginBottom: '1.5rem', textAlign: 'center', lineHeight: '1.6' }}>
+              Your personal AI strategy companion for board games. 
+              Each player uses their own device for a personalized experience.
+            </p>
+            
+            <button 
+              style={styles.button}
+              onClick={() => setAppPhase('createRoom')}
+            >
+              🎮 Create New Game
+            </button>
+            
+            <button 
+              style={{ ...styles.button, ...styles.buttonSecondary }}
+              onClick={() => setAppPhase('joinRoom')}
+            >
+              🚪 Join Existing Game
+            </button>
+          </div>
+          
+          <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.75rem', marginTop: '2rem' }}>
+            © 2024 Pat Boulay. All Rights Reserved.
+          </p>
         </div>
       </div>
     );
   }
   
-  return (
-    <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-700/50 bg-slate-800/50">
-        <h3 className="font-semibold text-sm text-slate-300 flex items-center gap-2">
-          <span>📜</span> TURN HISTORY ({history.length} turns)
-        </h3>
+  // -------------------------------------------------------------------------
+  // RENDER: CREATE ROOM SCREEN
+  // -------------------------------------------------------------------------
+  if (appPhase === 'createRoom') {
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '28rem', margin: '0 auto', paddingTop: '2rem' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>Create a New Game</p>
+          </div>
+          
+          <div style={styles.card}>
+            <label style={{ display: 'block', color: '#94a3b8', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+              Your Name
+            </label>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Enter your name"
+              style={styles.input}
+              maxLength={20}
+            />
+            
+            {error && (
+              <p style={{ color: '#f87171', fontSize: '0.875rem', marginBottom: '1rem' }}>{error}</p>
+            )}
+            
+            <button 
+              style={styles.button}
+              onClick={createRoom}
+              disabled={!nameInput.trim()}
+            >
+              Create Room
+            </button>
+            
+            <button 
+              style={{ ...styles.button, ...styles.buttonSecondary }}
+              onClick={() => { setAppPhase('welcome'); setError(''); }}
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
       </div>
-      <div className="p-3 max-h-64 overflow-y-auto space-y-2">
-        {history.slice().reverse().map((turn, i) => (
-          <div key={i} className="text-xs bg-slate-800/30 rounded p-2 border border-slate-700/30">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-semibold text-slate-300">T{turn.turn}: {turn.player}</span>
-              <span className="text-amber-400 text-[10px]">📍 {turn.room}</span>
-            </div>
-            <div className="text-slate-400 mb-2">
-              Suggested: <span className="text-slate-300">{turn.suggestion.suspect}</span> + 
-              <span className="text-slate-300"> {turn.suggestion.weapon}</span> + 
-              <span className="text-slate-300"> {turn.suggestion.room}</span>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {turn.responses.map((r, j) => (
-                <span 
-                  key={j}
-                  className={`px-1.5 py-0.5 rounded text-[10px] ${
-                    r.action === 'pass' 
-                      ? 'bg-red-900/30 text-red-400' 
-                      : 'bg-green-900/30 text-green-400'
-                  }`}
+    );
+  }
+  
+  // -------------------------------------------------------------------------
+  // RENDER: JOIN ROOM SCREEN
+  // -------------------------------------------------------------------------
+  if (appPhase === 'joinRoom') {
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '28rem', margin: '0 auto', paddingTop: '2rem' }}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>BoardBrain™</h1>
+            <p style={styles.subtitle}>Join a Game</p>
+          </div>
+          
+          <div style={styles.card}>
+            <label style={{ display: 'block', color: '#94a3b8', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+              Your Name
+            </label>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Enter your name"
+              style={styles.input}
+              maxLength={20}
+            />
+            
+            <label style={{ display: 'block', color: '#94a3b8', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+              Room Code
+            </label>
+            <input
+              type="text"
+              value={joinCodeInput}
+              onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+              placeholder="e.g., ABC123"
+              style={{ ...styles.input, textAlign: 'center', letterSpacing: '0.2em', fontSize: '1.25rem' }}
+              maxLength={6}
+            />
+            
+            {error && (
+              <p style={{ color: '#f87171', fontSize: '0.875rem', marginBottom: '1rem' }}>{error}</p>
+            )}
+            
+            <button 
+              style={styles.button}
+              onClick={joinRoom}
+              disabled={!nameInput.trim() || joinCodeInput.length !== 6}
+            >
+              Join Room
+            </button>
+            
+            <button 
+              style={{ ...styles.button, ...styles.buttonSecondary }}
+              onClick={() => { setAppPhase('welcome'); setError(''); }}
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // -------------------------------------------------------------------------
+  // RENDER: LOBBY SCREEN
+  // -------------------------------------------------------------------------
+  if (appPhase === 'lobby' && gameState) {
+    const players = gameState.players || {};
+    const playerList = Object.values(players);
+    const numPlayers = playerList.length;
+    const cardsPerPlayer = Math.floor(18 / numPlayers);
+    const myPlayer = players[playerId];
+    const allReady = playerList.every(p => p.isReady);
+    
+    // Find taken characters
+    const takenCharacters = playerList.map(p => p.character).filter(Boolean);
+    
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '32rem', margin: '0 auto', paddingTop: '1rem' }}>
+          <div style={styles.header}>
+            <h1 style={{ ...styles.title, fontSize: '1.5rem' }}>BoardBrain™</h1>
+            <p style={styles.subtitle}>Game Lobby</p>
+          </div>
+          
+          {/* Room Code Display */}
+          <div style={styles.card}>
+            <p style={{ color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center', marginBottom: '0.5rem' }}>
+              Share this code with other players:
+            </p>
+            <div style={styles.roomCode}>{roomCode}</div>
+            <p style={{ color: '#64748b', fontSize: '0.75rem', textAlign: 'center' }}>
+              {numPlayers} player{numPlayers !== 1 ? 's' : ''} in lobby
+            </p>
+          </div>
+          
+          {/* Players List */}
+          <div style={styles.card}>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Players</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              {playerList.map(p => (
+                <div 
+                  key={p.id}
+                  style={{
+                    ...styles.playerChip,
+                    backgroundColor: p.isReady ? '#166534' : '#334155',
+                    border: p.id === playerId ? '2px solid #8b5cf6' : '2px solid transparent',
+                  }}
                 >
-                  {r.player}: {r.action === 'pass' ? 'PASS' : 'SHOWED'}
-                  {r.cardShown && <span className="text-blue-300"> ({r.cardShown})</span>}
+                  {p.isReady && <span style={{ marginRight: '0.5rem' }}>✓</span>}
+                  {p.name}
+                  {p.character && <span style={{ marginLeft: '0.5rem', color: '#94a3b8' }}>({p.character.split(' ')[1] || p.character})</span>}
+                  {p.id === gameState.hostId && <span style={{ marginLeft: '0.5rem' }}>👑</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          {/* Character Selection */}
+          {!myPlayer?.character && (
+            <div style={styles.card}>
+              <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Select Your Character</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {CLUE_DATA.suspects.map(character => {
+                  const taken = takenCharacters.includes(character);
+                  return (
+                    <button
+                      key={character}
+                      onClick={() => !taken && selectCharacter(character)}
+                      disabled={taken}
+                      style={{
+                        ...styles.cardChip,
+                        ...(taken ? { opacity: 0.4, cursor: 'not-allowed' } : styles.cardChipUnselected),
+                      }}
+                    >
+                      {character}
+                    </button>
+                  );
+                })}
+              </div>
+              {error && <p style={{ color: '#f87171', fontSize: '0.875rem', marginTop: '0.75rem' }}>{error}</p>}
+            </div>
+          )}
+          
+          {/* Card Selection */}
+          {myPlayer?.character && !myPlayer?.isReady && (
+            <div style={styles.card}>
+              <h3 style={{ marginBottom: '0.5rem', fontSize: '1rem' }}>Select Your Cards</h3>
+              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                You have {cardsPerPlayer} cards. Selected: {selectedCards.length}/{cardsPerPlayer}
+              </p>
+              
+              {['suspects', 'weapons', 'rooms'].map(category => (
+                <div key={category} style={{ marginBottom: '1rem' }}>
+                  <p style={{ color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                    {category}
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                    {CLUE_DATA[category].map(card => (
+                      <button
+                        key={card}
+                        onClick={() => toggleCard(card)}
+                        style={{
+                          ...styles.cardChip,
+                          ...(selectedCards.includes(card) ? styles.cardChipSelected : styles.cardChipUnselected),
+                          fontSize: '0.75rem',
+                          padding: '0.375rem 0.5rem',
+                        }}
+                      >
+                        {card}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              
+              <button
+                onClick={confirmCards}
+                disabled={selectedCards.length !== cardsPerPlayer}
+                style={{
+                  ...styles.button,
+                  ...(selectedCards.length !== cardsPerPlayer ? styles.buttonDisabled : {}),
+                }}
+              >
+                Confirm Cards ✓
+              </button>
+            </div>
+          )}
+          
+          {/* Ready Status */}
+          {myPlayer?.isReady && (
+            <div style={{ ...styles.card, backgroundColor: '#166534', border: '2px solid #22c55e' }}>
+              <p style={{ textAlign: 'center', color: '#bbf7d0', fontWeight: '600' }}>
+                ✓ You're ready! Waiting for other players...
+              </p>
+            </div>
+          )}
+          
+          {/* Start Game Button (Host Only) */}
+          {isHost && allReady && playerList.length >= 2 && (
+            <button
+              onClick={startGame}
+              style={{ ...styles.button, background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)' }}
+            >
+              🚀 Start Game
+            </button>
+          )}
+          
+          {isHost && !allReady && (
+            <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+              Waiting for all players to select their cards...
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // -------------------------------------------------------------------------
+  // RENDER: PLAYING SCREEN (Main Game)
+  // -------------------------------------------------------------------------
+  if (gameState?.phase === 'playing') {
+    const players = gameState.players || {};
+    const playerList = Object.values(players);
+    const turnOrder = gameState.turnOrder || [];
+    const currentPlayerId = turnOrder[gameState.currentPlayerIndex];
+    const isMyTurn = currentPlayerId === playerId;
+    const currentPlayerName = players[currentPlayerId]?.name || 'Unknown';
+    
+    // My knowledge
+    const myCards = myPrivateData?.cards || [];
+    const shownToMe = myPrivateData?.shownToMe || [];
+    
+    return (
+      <div style={styles.container}>
+        <div style={{ maxWidth: '100%', margin: '0 auto' }}>
+          {/* Header */}
+          <div style={{ ...styles.header, marginBottom: '1rem' }}>
+            <h1 style={{ ...styles.title, fontSize: '1.5rem' }}>BoardBrain™</h1>
+            <p style={styles.subtitle}>
+              Turn {gameState.currentTurn} • You are {playerName}
+            </p>
+          </div>
+          
+          {/* Turn Indicator */}
+          <div style={{
+            ...styles.turnIndicator,
+            ...(isMyTurn ? styles.myTurn : styles.notMyTurn),
+          }}>
+            {isMyTurn ? "🎯 Your Turn - Make a Suggestion!" : `⏳ ${currentPlayerName}'s Turn`}
+          </div>
+          
+          {/* My Cards */}
+          <div style={{ ...styles.card, padding: '0.75rem' }}>
+            <h4 style={{ fontSize: '0.75rem', color: '#8b5cf6', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+              🎴 My Cards
+            </h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+              {myCards.map(card => (
+                <span key={card} style={{
+                  padding: '0.25rem 0.5rem',
+                  backgroundColor: '#8b5cf6',
+                  color: 'white',
+                  borderRadius: '0.25rem',
+                  fontSize: '0.75rem',
+                }}>
+                  {card}
                 </span>
               ))}
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// Main Control Room Component
-export default function BoardBrainControlRoom() {
-  // Game phases: 'setup', 'playing'
-  const [gamePhase, setGamePhase] = useState('setup');
-  
-  // Setup state
-  const [numPlayers, setNumPlayers] = useState(4);
-  const [playerSetup, setPlayerSetup] = useState([
-    { name: 'Player 1', character: '' },
-    { name: 'Player 2', character: '' },
-    { name: 'Player 3', character: '' },
-    { name: 'You', character: '' },  // Always last
-  ]);
-  const [myCards, setMyCards] = useState([]);
-  const [publicCards, setPublicCards] = useState([]);
-  
-  // Game state
-  const [gameState, setGameState] = useState(null);
-  const [turnHistory, setTurnHistory] = useState([]);
-  const [currentTurn, setCurrentTurn] = useState(1);
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
-  const [playerLocations, setPlayerLocations] = useState({});
-  const [currentTime, setCurrentTime] = useState(new Date());
-  
-  const CHARACTERS = ['Colonel Mustard', 'Miss Scarlet', 'Professor Plum', 'Mr. Green', 'Mrs. White', 'Mrs. Peacock'];
-  const SUSPECTS = CHARACTERS;
-  const WEAPONS = ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'];
-  const ROOMS = ['Kitchen', 'Ballroom', 'Conservatory', 'Dining Room', 'Billiard Room', 'Library', 'Lounge', 'Hall', 'Study'];
-  const ALL_CARDS = [...SUSPECTS, ...WEAPONS, ...ROOMS];
-  
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  
-  // Update player setup when count changes
-  const handleNumPlayersChange = (num) => {
-    setNumPlayers(num);
-    const newSetup = [];
-    for (let i = 0; i < num - 1; i++) {
-      newSetup.push({ name: `Player ${i + 1}`, character: '' });
-    }
-    newSetup.push({ name: 'You', character: '' }); // Always last
-    setPlayerSetup(newSetup);
-    setMyCards([]);
-    setPublicCards([]);
-  };
-  
-  // Calculate cards per player
-  const cardsPerPlayer = Math.floor(18 / numPlayers);
-  const remainderCount = 18 % numPlayers;
-  
-  // Check if setup is complete
-  const setupComplete = playerSetup.every(p => p.character) && 
-                        myCards.length === cardsPerPlayer &&
-                        publicCards.length === remainderCount;
-  
-  // Start game
-  const handleStartGame = () => {
-    // Initialize game state with empty probabilities
-    const initSuspects = {};
-    const initWeapons = {};
-    const initRooms = {};
-    
-    SUSPECTS.forEach(s => {
-      const isMine = myCards.includes(s);
-      const isPublic = publicCards.includes(s);
-      initSuspects[s] = {
-        prob: isMine || isPublic ? 0 : Math.round(100 / (6 - myCards.filter(c => SUSPECTS.includes(c)).length - publicCards.filter(c => SUSPECTS.includes(c)).length)),
-        status: isMine ? 'mine' : isPublic ? 'eliminated' : 'possible',
-        evidence: isMine ? [{ type: 'hand', text: 'In my hand at game start' }] : 
-                  isPublic ? [{ type: 'public', text: 'Public card - everyone knows' }] : []
-      };
-    });
-    
-    WEAPONS.forEach(w => {
-      const isMine = myCards.includes(w);
-      const isPublic = publicCards.includes(w);
-      initWeapons[w] = {
-        prob: isMine || isPublic ? 0 : Math.round(100 / (6 - myCards.filter(c => WEAPONS.includes(c)).length - publicCards.filter(c => WEAPONS.includes(c)).length)),
-        status: isMine ? 'mine' : isPublic ? 'eliminated' : 'possible',
-        evidence: isMine ? [{ type: 'hand', text: 'In my hand at game start' }] : 
-                  isPublic ? [{ type: 'public', text: 'Public card - everyone knows' }] : []
-      };
-    });
-    
-    ROOMS.forEach(r => {
-      const isMine = myCards.includes(r);
-      const isPublic = publicCards.includes(r);
-      initRooms[r] = {
-        prob: isMine || isPublic ? 0 : Math.round(100 / (9 - myCards.filter(c => ROOMS.includes(c)).length - publicCards.filter(c => ROOMS.includes(c)).length)),
-        status: isMine ? 'mine' : isPublic ? 'eliminated' : 'possible',
-        evidence: isMine ? [{ type: 'hand', text: 'In my hand at game start' }] : 
-                  isPublic ? [{ type: 'public', text: 'Public card - everyone knows' }] : []
-      };
-    });
-    
-    // Initialize player locations (start in their character's home position or null)
-    const initLocations = {};
-    playerSetup.forEach(p => {
-      initLocations[p.name] = null;
-    });
-    
-    setGameState({
-      players: playerSetup.map(p => p.name),
-      characters: playerSetup.reduce((acc, p) => { acc[p.name] = p.character; return acc; }, {}),
-      myCards,
-      publicCards,
-      suspects: initSuspects,
-      weapons: initWeapons,
-      rooms: initRooms,
-      constraints: [],
-      insights: []
-    });
-    
-    setPlayerLocations(initLocations);
-    setCurrentPlayerIndex(0);
-    setCurrentTurn(1);
-    setTurnHistory([]);
-    setGamePhase('playing');
-  };
-  
-  const handleLogTurn = (turnData) => {
-    // Update player location
-    const newLocations = { ...playerLocations };
-    newLocations[turnData.player] = turnData.room;
-    setPlayerLocations(newLocations);
-    
-    setTurnHistory([...turnHistory, turnData]);
-    setCurrentTurn(currentTurn + 1);
-    setCurrentPlayerIndex((currentPlayerIndex + 1) % playerSetup.length);
-    
-    // TODO: Process turn data to update probabilities and evidence
-    console.log('Turn logged:', turnData);
-  };
-  
-  // Constants for card selection
-  const CHARACTERS_LIST = ['Colonel Mustard', 'Miss Scarlet', 'Professor Plum', 'Mr. Green', 'Mrs. White', 'Mrs. Peacock'];
-  const SUSPECTS_LIST = CHARACTERS_LIST;
-  const WEAPONS_LIST = ['Candlestick', 'Knife', 'Lead Pipe', 'Revolver', 'Rope', 'Wrench'];
-  const ROOMS_LIST = ['Kitchen', 'Ballroom', 'Conservatory', 'Dining Room', 'Billiard Room', 'Library', 'Lounge', 'Hall', 'Study'];
-  const ALL_CARDS_LIST = [...SUSPECTS_LIST, ...WEAPONS_LIST, ...ROOMS_LIST];
-  
-  // SETUP SCREEN
-  if (gamePhase === 'setup') {
-    const usedCharacters = playerSetup.map(p => p.character).filter(Boolean);
-    const availableCards = ALL_CARDS_LIST.filter(c => !myCards.includes(c) && !publicCards.includes(c));
-    
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4 font-sans">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-black tracking-tight bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400 bg-clip-text text-transparent mb-2">
-              BOARDBRAIN™
-            </h1>
-            <p className="text-slate-400">Game Setup • Clue</p>
-          </div>
           
-          {/* Number of Players */}
-          <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 p-6 mb-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Number of Players</h2>
-            <div className="flex gap-3">
-              {[3, 4, 5, 6].map(num => (
-                <button
-                  key={num}
-                  onClick={() => handleNumPlayersChange(num)}
-                  className={`w-16 h-16 rounded-lg text-2xl font-bold transition-colors
-                    ${numPlayers === num 
-                      ? 'bg-indigo-600 text-white' 
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
-            <p className="text-sm text-slate-500 mt-3">
-              {cardsPerPlayer} cards per player
-              {remainderCount > 0 && `, ${remainderCount} public card${remainderCount > 1 ? 's' : ''}`}
-            </p>
-          </div>
-          
-          {/* Player & Character Assignment */}
-          <div className="bg-slate-900/80 rounded-lg border border-slate-700/50 p-6 mb-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Players & Characters (Turn Order)</h2>
-            <p className="text-sm text-slate-400 mb-4">
-              Enter players in turn order. "You" are always last.
-            </p>
+          {/* Knowledge Matrix - Personalized View */}
+          <div style={styles.card}>
+            <h3 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>📊 Your Knowledge Matrix</h3>
             
-            <div className="space-y-3">
-              {playerSetup.map((player, idx) => (
-                <div key={idx} className="flex items-center gap-4">
-                  {/* Turn order indicator */}
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
-                    ${idx === playerSetup.length - 1 ? 'bg-blue-900 text-blue-300' : 'bg-slate-800 text-slate-400'}`}>
-                    {idx + 1}
-                  </div>
-                  
-                  {/* Player name */}
-                  <input
-                    type="text"
-                    value={player.name}
-                    onChange={(e) => {
-                      if (idx < playerSetup.length - 1) {
-                        const newSetup = [...playerSetup];
-                        newSetup[idx].name = e.target.value;
-                        setPlayerSetup(newSetup);
-                      }
-                    }}
-                    disabled={idx === playerSetup.length - 1}
-                    className={`flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm
-                      ${idx === playerSetup.length - 1 ? 'text-blue-400 font-semibold' : 'text-white'}`}
-                    placeholder="Player name"
-                  />
-                  
-                  {/* Character selection */}
-                  <select
-                    value={player.character}
-                    onChange={(e) => {
-                      const newSetup = [...playerSetup];
-                      newSetup[idx].character = e.target.value;
-                      setPlayerSetup(newSetup);
-                    }}
-                    className="w-48 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white"
-                  >
-                    <option value="">Select character...</option>
-                    {CHARACTERS_LIST.map(c => (
-                      <option 
-                        key={c} 
-                        value={c}
-                        disabled={usedCharacters.includes(c) && player.character !== c}
-                      >
-                        {c}
-                      </option>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={{ ...styles.th, textAlign: 'left', minWidth: '80px' }}>Card</th>
+                    {playerList.map((p, idx) => (
+                      <th key={p.id} style={styles.th}>
+                        <div style={{ fontSize: '0.625rem', color: p.id === playerId ? '#8b5cf6' : '#64748b' }}>
+                          {p.id === playerId ? 'ME' : `P${idx + 1}`}
+                        </div>
+                      </th>
                     ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          {/* My Cards */}
-          <div className="bg-slate-900/80 rounded-lg border border-blue-500/30 p-6 mb-6">
-            <h2 className="text-lg font-semibold text-blue-300 mb-2">Your Cards ({myCards.length}/{cardsPerPlayer})</h2>
-            <p className="text-sm text-slate-400 mb-4">Select the {cardsPerPlayer} cards in your hand.</p>
-            
-            {myCards.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
-                {myCards.map(card => (
-                  <button
-                    key={card}
-                    onClick={() => setMyCards(myCards.filter(c => c !== card))}
-                    className="px-3 py-1.5 bg-blue-900/40 border border-blue-500/40 rounded-full text-xs text-blue-200 font-medium hover:bg-red-900/40 hover:border-red-500/40 hover:text-red-200 transition-colors"
-                  >
-                    {card} ✕
-                  </button>
-                ))}
-              </div>
-            )}
-            
-            {myCards.length < cardsPerPlayer && (
-              <div className="space-y-3">
-                <div>
-                  <div className="text-xs text-slate-500 uppercase mb-2">Suspects</div>
-                  <div className="flex flex-wrap gap-1">
-                    {SUSPECTS_LIST.filter(c => !myCards.includes(c) && !publicCards.includes(c)).map(card => (
-                      <button
-                        key={card}
-                        onClick={() => setMyCards([...myCards, card])}
-                        className="px-2 py-1 bg-slate-800 hover:bg-blue-900/50 border border-slate-600 hover:border-blue-500/50 rounded text-xs text-slate-300 hover:text-blue-200 transition-colors"
-                      >
-                        {card}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 uppercase mb-2">Weapons</div>
-                  <div className="flex flex-wrap gap-1">
-                    {WEAPONS_LIST.filter(c => !myCards.includes(c) && !publicCards.includes(c)).map(card => (
-                      <button
-                        key={card}
-                        onClick={() => setMyCards([...myCards, card])}
-                        className="px-2 py-1 bg-slate-800 hover:bg-blue-900/50 border border-slate-600 hover:border-blue-500/50 rounded text-xs text-slate-300 hover:text-blue-200 transition-colors"
-                      >
-                        {card}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 uppercase mb-2">Rooms</div>
-                  <div className="flex flex-wrap gap-1">
-                    {ROOMS_LIST.filter(c => !myCards.includes(c) && !publicCards.includes(c)).map(card => (
-                      <button
-                        key={card}
-                        onClick={() => setMyCards([...myCards, card])}
-                        className="px-2 py-1 bg-slate-800 hover:bg-blue-900/50 border border-slate-600 hover:border-blue-500/50 rounded text-xs text-slate-300 hover:text-blue-200 transition-colors"
-                      >
-                        {card}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Public Cards */}
-          {remainderCount > 0 && (
-            <div className="bg-slate-900/80 rounded-lg border border-slate-500/30 p-6 mb-6">
-              <h2 className="text-lg font-semibold text-slate-300 mb-2">Public Cards ({publicCards.length}/{remainderCount})</h2>
-              <p className="text-sm text-slate-400 mb-4">Select the {remainderCount} card{remainderCount > 1 ? 's' : ''} everyone can see.</p>
-              
-              {publicCards.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {publicCards.map(card => (
-                    <button
-                      key={card}
-                      onClick={() => setPublicCards(publicCards.filter(c => c !== card))}
-                      className="px-3 py-1.5 bg-slate-700/40 border border-slate-500/40 rounded-full text-xs text-slate-200 font-medium hover:bg-red-900/40 hover:border-red-500/40 hover:text-red-200 transition-colors"
-                    >
-                      {card} ✕
-                    </button>
+                    <th style={styles.th}>Sol?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {['suspects', 'weapons', 'rooms'].map(category => (
+                    <React.Fragment key={category}>
+                      <tr style={{ backgroundColor: '#1e293b' }}>
+                        <td colSpan={playerList.length + 2} style={{ 
+                          ...styles.td, 
+                          color: '#64748b', 
+                          fontWeight: '600', 
+                          textAlign: 'left',
+                          fontSize: '0.625rem',
+                          textTransform: 'uppercase',
+                        }}>
+                          {category}
+                        </td>
+                      </tr>
+                      {CLUE_DATA[category].map(card => {
+                        const iHaveIt = myCards.includes(card);
+                        const shownToMeEntry = shownToMe.find(s => s.card === card);
+                        
+                        return (
+                          <tr key={card}>
+                            <td style={{ ...styles.td, textAlign: 'left', fontSize: '0.7rem' }}>{card}</td>
+                            {playerList.map(p => {
+                              let symbol = '?';
+                              let color = '#64748b';
+                              
+                              if (p.id === playerId && iHaveIt) {
+                                symbol = '✓';
+                                color = '#4ade80';
+                              } else if (shownToMeEntry && shownToMeEntry.shownBy === p.id) {
+                                symbol = '✓';
+                                color = '#4ade80';
+                              }
+                              
+                              return (
+                                <td key={p.id} style={styles.td}>
+                                  <span style={{ color }}>{symbol}</span>
+                                </td>
+                              );
+                            })}
+                            <td style={styles.td}>
+                              <span style={{ color: iHaveIt || shownToMeEntry ? '#f87171' : '#64748b' }}>
+                                {iHaveIt || shownToMeEntry ? '✗' : '?'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   ))}
-                </div>
-              )}
-              
-              {publicCards.length < remainderCount && (
-                <div className="flex flex-wrap gap-1">
-                  {availableCards.map(card => (
-                    <button
-                      key={card}
-                      onClick={() => setPublicCards([...publicCards, card])}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 rounded text-xs text-slate-300 transition-colors"
-                    >
-                      {card}
-                    </button>
-                  ))}
-                </div>
-              )}
+                </tbody>
+              </table>
             </div>
+          </div>
+          
+          {/* Suggestion Interface (when it's my turn) */}
+          {isMyTurn && !gameState.awaitingResponse && (
+            <SuggestionInterface 
+              onSubmit={submitSuggestion}
+              styles={styles}
+            />
           )}
           
-          {/* Start Game Button */}
-          <button
-            onClick={handleStartGame}
-            disabled={!setupComplete}
-            className={`w-full py-4 rounded-lg text-lg font-bold transition-colors
-              ${setupComplete 
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-          >
-            {setupComplete ? '🎮 Start Game' : 'Complete Setup to Start'}
-          </button>
-          
-          {/* Setup checklist */}
-          <div className="mt-4 text-sm text-slate-500">
-            <div className={playerSetup.every(p => p.character) ? 'text-emerald-400' : ''}>
-              {playerSetup.every(p => p.character) ? '✓' : '○'} All players assigned characters
-            </div>
-            <div className={myCards.length === cardsPerPlayer ? 'text-emerald-400' : ''}>
-              {myCards.length === cardsPerPlayer ? '✓' : '○'} Your cards selected ({myCards.length}/{cardsPerPlayer})
-            </div>
-            {remainderCount > 0 && (
-              <div className={publicCards.length === remainderCount ? 'text-emerald-400' : ''}>
-                {publicCards.length === remainderCount ? '✓' : '○'} Public cards selected ({publicCards.length}/{remainderCount})
-              </div>
-            )}
-          </div>
+          {/* Response Interface (when waiting for responses) */}
+          {gameState.awaitingResponse && gameState.currentMove && (
+            <ResponseInterface
+              currentMove={gameState.currentMove}
+              playerId={playerId}
+              myCards={myCards}
+              onRespond={respondToSuggestion}
+              onAdvance={isHost ? advanceTurn : null}
+              styles={styles}
+            />
+          )}
         </div>
       </div>
     );
   }
   
-  // PLAYING SCREEN - need gameState to be initialized
-  if (!gameState) return null;
+  // -------------------------------------------------------------------------
+  // RENDER: LOADING / DEFAULT
+  // -------------------------------------------------------------------------
+  return (
+    <div style={styles.container}>
+      <div style={{ textAlign: 'center', paddingTop: '4rem' }}>
+        <h1 style={styles.title}>BoardBrain™</h1>
+        <p style={styles.subtitle}>Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SUGGESTION INTERFACE COMPONENT
+// ============================================================================
+function SuggestionInterface({ onSubmit, styles }) {
+  const [suspect, setSuspect] = useState('');
+  const [weapon, setWeapon] = useState('');
+  const [room, setRoom] = useState('');
+  
+  const canSubmit = suspect && weapon && room;
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4 font-sans">
-      {/* Scanline overlay effect */}
-      <div className="fixed inset-0 pointer-events-none opacity-[0.02] z-50"
-        style={{
-          backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 4px)'
-        }}
-      />
+    <div style={styles.card}>
+      <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>🔍 Make a Suggestion</h3>
       
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400 bg-clip-text text-transparent">
-              BOARDBRAIN™
-            </h1>
-            <p className="text-slate-500 text-sm tracking-widest uppercase">Control Room • Clue</p>
-          </div>
-          
-          <div className="flex items-center gap-6">
-            {/* Turn indicator */}
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-widest text-slate-500">Turn</div>
-              <div className="text-3xl font-black text-white font-mono">{currentTurn}</div>
-            </div>
-            
-            {/* Divider */}
-            <div className="w-px h-12 bg-slate-700" />
-            
-            {/* Clock */}
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-widest text-slate-500">Time</div>
-              <div className="text-lg font-mono text-slate-300">
-                {currentTime.toLocaleTimeString()}
-              </div>
-            </div>
-          </div>
-        </header>
-        
-        {/* Main Grid */}
-        <div className="grid grid-cols-12 gap-4">
-          {/* Left Column - Solution Candidates + My Cards */}
-          <div className="col-span-12 lg:col-span-4 space-y-4">
-            <SolutionCandidates 
-              suspects={gameState.suspects}
-              weapons={gameState.weapons}
-              rooms={gameState.rooms}
-            />
-            <MyCardsAndPublic myCards={gameState.myCards} publicCards={gameState.publicCards} />
-          </div>
-          
-          {/* Middle Column - Turn Sequence + Turn Input + History */}
-          <div className="col-span-12 lg:col-span-4 space-y-4">
-            <TurnSequence 
-              players={gameState.players}
-              characters={gameState.characters}
-              currentPlayerIndex={currentPlayerIndex}
-              playerLocations={playerLocations}
-              turnHistory={turnHistory}
-            />
-            <TurnInput 
-              players={gameState.players}
-              turn={currentTurn}
-              currentPlayerIndex={currentPlayerIndex}
-              onLogTurn={handleLogTurn}
-            />
-            <GameHistory history={turnHistory} />
-          </div>
-          
-          {/* Right Column - The Three Charts */}
-          <div className="col-span-12 lg:col-span-4 space-y-4">
-            <ProbabilityChart 
-              title="Suspects" 
-              icon="🕵️"
-              data={gameState.suspects}
-              accentColor="bg-red-900/30"
-            />
-            <ProbabilityChart 
-              title="Weapons" 
-              icon="🔪"
-              data={gameState.weapons}
-              accentColor="bg-amber-900/30"
-            />
-            <ProbabilityChart 
-              title="Rooms" 
-              icon="🚪"
-              data={gameState.rooms}
-              accentColor="bg-emerald-900/30"
-            />
-          </div>
+      {/* Suspect */}
+      <div style={{ marginBottom: '1rem' }}>
+        <p style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: '0.5rem' }}>SUSPECT</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {CLUE_DATA.suspects.map(s => (
+            <button
+              key={s}
+              onClick={() => setSuspect(s)}
+              style={{
+                ...styles.cardChip,
+                ...(suspect === s ? styles.cardChipSelected : styles.cardChipUnselected),
+                fontSize: '0.75rem',
+                padding: '0.375rem 0.5rem',
+              }}
+            >
+              {s.split(' ')[1] || s}
+            </button>
+          ))}
         </div>
-        
-        {/* Footer */}
-        <footer className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-600">
-          <div>© 2024-2026 Xformative AI LLC. All Rights Reserved.</div>
-          <div className="flex items-center gap-4">
-            <span>BoardBrain™</span>
-            <span>•</span>
-            <span>Universal Experience Grammar</span>
-            <span>•</span>
-            <span className="text-emerald-600">● LIVE</span>
-          </div>
-        </footer>
       </div>
+      
+      {/* Weapon */}
+      <div style={{ marginBottom: '1rem' }}>
+        <p style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: '0.5rem' }}>WEAPON</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {CLUE_DATA.weapons.map(w => (
+            <button
+              key={w}
+              onClick={() => setWeapon(w)}
+              style={{
+                ...styles.cardChip,
+                ...(weapon === w ? styles.cardChipSelected : styles.cardChipUnselected),
+                fontSize: '0.75rem',
+                padding: '0.375rem 0.5rem',
+              }}
+            >
+              {w}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Room */}
+      <div style={{ marginBottom: '1rem' }}>
+        <p style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: '0.5rem' }}>ROOM</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {CLUE_DATA.rooms.map(r => (
+            <button
+              key={r}
+              onClick={() => setRoom(r)}
+              style={{
+                ...styles.cardChip,
+                ...(room === r ? styles.cardChipSelected : styles.cardChipUnselected),
+                fontSize: '0.75rem',
+                padding: '0.375rem 0.5rem',
+              }}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      <button
+        onClick={() => canSubmit && onSubmit(suspect, weapon, room)}
+        disabled={!canSubmit}
+        style={{
+          ...styles.button,
+          ...(canSubmit ? {} : styles.buttonDisabled),
+        }}
+      >
+        Submit Suggestion
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// RESPONSE INTERFACE COMPONENT
+// ============================================================================
+function ResponseInterface({ currentMove, playerId, myCards, onRespond, onAdvance, styles }) {
+  const [selectedCard, setSelectedCard] = useState('');
+  
+  const suggestedCards = [currentMove.suspect, currentMove.weapon, currentMove.room];
+  const myMatchingCards = myCards.filter(c => suggestedCards.includes(c));
+  const canShow = myMatchingCards.length > 0;
+  const isSuggester = currentMove.suggesterId === playerId;
+  const hasResponded = currentMove.responses?.[playerId];
+  
+  // Check if it's my turn to respond (in clockwise order after suggester)
+  // For simplicity, show response options to all non-suggester players who haven't responded
+  
+  if (isSuggester) {
+    return (
+      <div style={styles.card}>
+        <h3 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>🔍 Your Suggestion</h3>
+        <p style={{ color: '#cbd5e1', marginBottom: '0.5rem' }}>
+          {currentMove.suspect} with the {currentMove.weapon} in the {currentMove.room}
+        </p>
+        <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+          Waiting for other players to respond...
+        </p>
+        
+        {/* Show responses so far */}
+        {Object.keys(currentMove.responses || {}).length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <p style={{ color: '#64748b', fontSize: '0.75rem', marginBottom: '0.5rem' }}>RESPONSES:</p>
+            {Object.entries(currentMove.responses).map(([pid, resp]) => (
+              <div key={pid} style={{ 
+                padding: '0.5rem', 
+                backgroundColor: resp.response === 'showed' ? '#166534' : '#1e293b',
+                borderRadius: '0.25rem',
+                marginBottom: '0.25rem',
+                fontSize: '0.875rem',
+              }}>
+                {resp.response === 'showed' ? `✓ Showed: ${resp.cardShown}` : '✗ Passed'}
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {onAdvance && (
+          <button
+            onClick={onAdvance}
+            style={{ ...styles.button, marginTop: '1rem', background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)' }}
+          >
+            Next Turn →
+          </button>
+        )}
+      </div>
+    );
+  }
+  
+  if (hasResponded) {
+    return (
+      <div style={styles.card}>
+        <p style={{ color: '#94a3b8', textAlign: 'center' }}>
+          ✓ You've responded. Waiting for turn to continue...
+        </p>
+      </div>
+    );
+  }
+  
+  return (
+    <div style={styles.card}>
+      <h3 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>🎴 Respond to Suggestion</h3>
+      <p style={{ color: '#cbd5e1', marginBottom: '1rem' }}>
+        <strong>{currentMove.suggesterName}</strong> suggests: {currentMove.suspect} with the {currentMove.weapon} in the {currentMove.room}
+      </p>
+      
+      {canShow ? (
+        <>
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
+            You can show one of these cards:
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+            {myMatchingCards.map(card => (
+              <button
+                key={card}
+                onClick={() => setSelectedCard(card)}
+                style={{
+                  ...styles.cardChip,
+                  ...(selectedCard === card ? styles.cardChipSelected : styles.cardChipUnselected),
+                }}
+              >
+                {card}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => selectedCard && onRespond('showed', selectedCard)}
+            disabled={!selectedCard}
+            style={{
+              ...styles.button,
+              ...(selectedCard ? {} : styles.buttonDisabled),
+              background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+            }}
+          >
+            Show Card
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => onRespond('passed')}
+          style={{ ...styles.button, ...styles.buttonSecondary }}
+        >
+          Pass (I don't have any of these cards)
+        </button>
+      )}
     </div>
   );
 }

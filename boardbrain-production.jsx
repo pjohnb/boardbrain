@@ -13,7 +13,7 @@ const YOU = 'Lisa';
 const CARDS = {
   suspects: ['Mustard', 'Scarlet', 'Plum', 'Green', 'White', 'Peacock'],
   weapons: ['Candle', 'Knife', 'Pipe', 'Gun', 'Rope', 'Wrench'],
-  rooms: ['Kitchen', 'Ball', 'Conserv', 'Dining', 'Billiard', 'Library', 'Lounge', 'Hall', 'Study']
+  rooms: ['Kitchen', 'Ballroom', 'Conserv', 'Dining', 'Billiard', 'Library', 'Lounge', 'Hall', 'Study']
 };
 
 // Simulated knowledge - what YOU (Lisa) know
@@ -30,21 +30,28 @@ const KNOWLEDGE = {
   'Scarlet': { Ann: 'HAS', Patrick: null, Lisa: 'NO', solution: 'NO', reason: 'Ann showed you this card on Turn 2' },
   'Knife': { Ann: null, Patrick: 'HAS', Lisa: 'NO', solution: 'NO', reason: 'Patrick showed you this card on Turn 3' },
   
-  // Deduced from constraints
+  // Deduced - likely solution
   'Plum': { Ann: 'NO', Patrick: 'NO', Lisa: 'NO', solution: 'LIKELY', reason: 'No one has this card - likely in solution (75%)' },
-  'Kitchen': { Ann: 'MAYBE', Patrick: 'MAYBE', Lisa: 'NO', solution: null, reason: 'Ann has ONE OF: Kitchen, Lounge, Wrench (Turn 4 constraint)' },
-  'Lounge': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, reason: 'Ann has ONE OF: Kitchen, Lounge, Wrench (Turn 4 constraint)' },
-  'Wrench': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, reason: 'Ann has ONE OF: Kitchen, Lounge, Wrench (Turn 4 constraint)' },
+  
+  // Constraint set A - Ann has ONE of these
+  'Kitchen': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
+  'Lounge': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
+  'Wrench': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
 };
 
 // Color mapping
 const COLORS = {
   HAS: '#22c55e',      // Green - confirmed has
   NO: '#ef4444',       // Red - confirmed doesn't have
-  MAYBE: '#eab308',    // Yellow - constraint/possible
-  LIKELY: '#f59e0b',   // Orange/Gold - likely in solution
+  MAYBE: '#facc15',    // Bright Yellow - constraint/possible
+  LIKELY: '#f97316',   // Orange - likely in solution
   UNKNOWN: '#334155',  // Dark gray - unknown
   YOUR_CARD: '#8b5cf6' // Purple - your own cards
+};
+
+// Constraint sets - which cards are linked
+const CONSTRAINTS = {
+  'A': { player: 'Ann', cards: ['Kitchen', 'Lounge', 'Wrench'], turn: 4 },
 };
 
 export default function MatrixPrototype() {
@@ -107,8 +114,8 @@ export default function MatrixPrototype() {
         <span><span style={{...styles.legendDot, background: COLORS.YOUR_CARD}}></span>Mine</span>
         <span><span style={{...styles.legendDot, background: COLORS.HAS}}></span>Has</span>
         <span><span style={{...styles.legendDot, background: COLORS.NO}}></span>No</span>
-        <span><span style={{...styles.legendDot, background: COLORS.MAYBE}}></span>Maybe</span>
-        <span><span style={{...styles.legendDot, background: COLORS.LIKELY}}></span>Solution?</span>
+        <span><span style={{...styles.legendDot, background: COLORS.MAYBE}}></span>A,B=Set</span>
+        <span><span style={{...styles.legendDot, background: COLORS.LIKELY}}></span>Solution</span>
       </div>
 
       {/* Matrix */}
@@ -138,16 +145,25 @@ export default function MatrixPrototype() {
                 {cards.map(card => (
                   <tr key={card}>
                     <td style={styles.cardName}>{card}</td>
-                    {PLAYERS.map(player => (
-                      <td
-                        key={player}
-                        style={{
-                          ...styles.cell,
-                          backgroundColor: getCellColor(card, player),
-                        }}
-                        onClick={() => handleTap(card, player)}
-                      />
-                    ))}
+                    {PLAYERS.map(player => {
+                      const k = KNOWLEDGE[card];
+                      const constraintLetter = k?.constraint && k[player] === 'MAYBE' ? k.constraint : null;
+                      
+                      return (
+                        <td
+                          key={player}
+                          style={{
+                            ...styles.cell,
+                            backgroundColor: getCellColor(card, player),
+                          }}
+                          onClick={() => handleTap(card, player)}
+                        >
+                          {constraintLetter && (
+                            <span style={styles.constraintLetter}>{constraintLetter}</span>
+                          )}
+                        </td>
+                      );
+                    })}
                     <td
                       style={{
                         ...styles.cell,
@@ -223,6 +239,19 @@ const styles = {
     marginRight: '3px',
     verticalAlign: 'middle',
   },
+  constraintLetter: {
+    fontSize: '9px',
+    fontWeight: '700',
+    color: '#000',
+    position: 'absolute',
+    top: '1px',
+    right: '3px',
+  },
+  cellWrapper: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+  },
   matrixContainer: {
     overflowX: 'auto',
   },
@@ -269,6 +298,7 @@ const styles = {
     borderBottom: '1px solid #1e293b',
     cursor: 'pointer',
     transition: 'opacity 0.1s',
+    position: 'relative',
   },
   hint: {
     textAlign: 'center',

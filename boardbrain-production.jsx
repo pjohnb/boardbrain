@@ -7,7 +7,7 @@ import React, { useState } from 'react';
  */
 
 // Sample game state for prototype
-const PLAYERS = ['Ann', 'Patrick', 'Lisa'];
+const PLAYERS = ['Ann', 'Pat', 'Lisa'];
 const YOU = 'Lisa';
 
 const CARDS = {
@@ -19,24 +19,24 @@ const CARDS = {
 // Simulated knowledge - what YOU (Lisa) know
 const KNOWLEDGE = {
   // Your cards
-  'Mustard': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
-  'Peacock': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
-  'Pipe': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
-  'Rope': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
-  'Conserv': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
-  'Billiard': { Ann: null, Patrick: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Mustard': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Peacock': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Pipe': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Rope': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Conserv': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
+  'Billiard': { Ann: null, Pat: null, Lisa: 'HAS', solution: 'NO', reason: 'You have this card' },
   
   // Cards shown to you
-  'Scarlet': { Ann: 'HAS', Patrick: null, Lisa: 'NO', solution: 'NO', reason: 'Ann showed you this card on Turn 2' },
-  'Knife': { Ann: null, Patrick: 'HAS', Lisa: 'NO', solution: 'NO', reason: 'Patrick showed you this card on Turn 3' },
+  'Scarlet': { Ann: 'HAS', Pat: null, Lisa: 'NO', solution: 'NO', reason: 'Ann showed you this card on Turn 2' },
+  'Knife': { Ann: null, Pat: 'HAS', Lisa: 'NO', solution: 'NO', reason: 'Pat showed you this card on Turn 3' },
   
   // Deduced - likely solution
-  'Plum': { Ann: 'NO', Patrick: 'NO', Lisa: 'NO', solution: 'LIKELY', reason: 'No one has this card - likely in solution (75%)' },
+  'Plum': { Ann: 'NO', Pat: 'NO', Lisa: 'NO', solution: 'LIKELY', reason: 'No one has this card - likely in solution (75%)' },
   
   // Constraint set A - Ann has ONE of these
-  'Kitchen': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
-  'Lounge': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
-  'Wrench': { Ann: 'MAYBE', Patrick: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
+  'Kitchen': { Ann: 'MAYBE', Pat: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
+  'Lounge': { Ann: 'MAYBE', Pat: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
+  'Wrench': { Ann: 'MAYBE', Pat: null, Lisa: 'NO', solution: null, constraint: 'A', reason: 'Constraint A: Ann has ONE OF Kitchen, Lounge, or Wrench (from Turn 4)' },
 };
 
 // Color mapping
@@ -114,7 +114,7 @@ export default function MatrixPrototype() {
         <span><span style={{...styles.legendDot, background: COLORS.YOUR_CARD}}></span>Mine</span>
         <span><span style={{...styles.legendDot, background: COLORS.HAS}}></span>Has</span>
         <span><span style={{...styles.legendDot, background: COLORS.NO}}></span>No</span>
-        <span><span style={{...styles.legendDot, background: COLORS.MAYBE}}></span>A,B=Set</span>
+        <span><span style={{...styles.legendDot, background: COLORS.MAYBE}}></span>Maybe</span>
         <span><span style={{...styles.legendDot, background: COLORS.LIKELY}}></span>Solution</span>
       </div>
 
